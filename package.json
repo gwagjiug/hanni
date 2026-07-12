@@ -1,0 +1,28 @@
+{
+  "name": "hanni",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "commands:register": "tsx scripts/register-discord-commands.ts",
+    "db:migrate:local": "wrangler d1 migrations apply hanni --local",
+    "db:migrate:remote": "wrangler d1 migrations apply hanni --remote"
+  },
+  "dependencies": {
+    "discord-interactions": "^4.4.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260708.1",
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5",
+    "wrangler": "^4.24.3"
+  }
+}
