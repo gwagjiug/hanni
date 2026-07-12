@@ -1,8 +1,5 @@
 export type AxDimension =
-  | "goal_achievement"
-  | "service_quality"
-  | "environment"
-  | "agent_behavior";
+  'goal_achievement' | 'service_quality' | 'environment' | 'agent_behavior';
 
 export interface EvalAssertion {
   name: string;
@@ -19,10 +16,10 @@ export interface AxScore {
 
 export function scoreAx(assertions: EvalAssertion[]): AxScore[] {
   const dimensions: AxDimension[] = [
-    "goal_achievement",
-    "service_quality",
-    "environment",
-    "agent_behavior",
+    'goal_achievement',
+    'service_quality',
+    'environment',
+    'agent_behavior',
   ];
   return dimensions.map((dimension) => {
     const items = assertions.filter((item) => item.dimension === dimension);
@@ -43,7 +40,9 @@ export function scopeAdherence(input: {
   toolCalls: number;
   runCreated: boolean;
 }): boolean {
-  if (!input.outOfScope) return true;
+  if (!input.outOfScope) {
+    return true;
+  }
   return (
     !input.responseGenerated &&
     input.llmCalls === 0 &&

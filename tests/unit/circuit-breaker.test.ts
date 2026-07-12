@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { CircuitBreaker, type CircuitLimits } from "../../src/agent/circuit-breaker";
+import { describe, expect, it } from 'vitest';
+import {
+  CircuitBreaker,
+  type CircuitLimits,
+} from '../../src/agent/circuit-breaker';
 
 const limits: CircuitLimits = {
   maxSteps: 3,
@@ -12,19 +15,19 @@ const limits: CircuitLimits = {
   maxNoProgressSteps: 1,
 };
 
-describe("CircuitBreaker", () => {
-  it("blocks a repeated tool call with the same arguments", () => {
+describe('CircuitBreaker', () => {
+  it('blocks a repeated tool call with the same arguments', () => {
     const circuit = new CircuitBreaker(limits);
-    circuit.tool("github.read", "same");
-    expect(() => circuit.tool("github.read", "same")).toThrow(
-      "circuit_repeated_tool_call",
+    circuit.tool('github.read', 'same');
+    expect(() => circuit.tool('github.read', 'same')).toThrow(
+      'circuit_repeated_tool_call',
     );
   });
 
-  it("enforces token limits reported by the model", () => {
+  it('enforces token limits reported by the model', () => {
     const circuit = new CircuitBreaker(limits);
     expect(() =>
       circuit.usage({ inputTokens: 11, cachedInputTokens: 0, outputTokens: 1 }),
-    ).toThrow("circuit_max_input_tokens");
+    ).toThrow('circuit_max_input_tokens');
   });
 });

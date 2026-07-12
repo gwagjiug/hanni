@@ -1,5 +1,6 @@
-import { assertTransition } from "../agent/state";
-import type { ArchiveDraft, RunRow, RunStatus } from "../types";
+import { assertTransition } from '../agent/state';
+import type { ArchiveDraft, RunRow, RunStatus } from '../types';
+import { costSummarySchema, runRowSchema, type CostSummary } from './schema';
 
 export class RunStore {
   constructor(private readonly db: D1Database) {}
@@ -39,24 +40,39 @@ export class RunStore {
   }
 
   async get(id: string): Promise<RunRow | null> {
-    return (await this.db.prepare("SELECT * FROM runs WHERE id = ?").bind(id).first<RunRow>()) ?? null;
+    const row = await this.db
+      .prepare('SELECT * FROM runs WHERE id = ?')
+      .bind(id)
+      .first();
+    return row ? runRowSchema.parse(row) : null;
   }
 
   async setInteractionToken(id: string, token: string): Promise<void> {
-    await this.db.prepare("UPDATE runs SET interaction_token = ?, updated_at = ? WHERE id = ?")
-      .bind(token, new Date().toISOString(), id).run();
+    await this.db
+      .prepare(
+        'UPDATE runs SET interaction_token = ?, updated_at = ? WHERE id = ?',
+      )
+      .bind(token, new Date().toISOString(), id)
+      .run();
   }
 
-  async transition(id: string, from: RunStatus, to: RunStatus, reason?: string): Promise<boolean> {
+  async transition(
+    id: string,
+    from: RunStatus,
+    to: RunStatus,
+    reason?: string,
+  ): Promise<boolean> {
     assertTransition(from, to);
     const result = await this.db
-      .prepare("UPDATE runs SET status = ?, termination_reason = ?, updated_at = ? WHERE id = ? AND status = ?")
+      .prepare(
+        'UPDATE runs SET status = ?, termination_reason = ?, updated_at = ? WHERE id = ? AND status = ?',
+      )
       .bind(to, reason ?? null, new Date().toISOString(), id, from)
       .run();
     return result.meta.changes === 1;
   }
 
-  async cancel(id: string, reason = "user_cancelled"): Promise<boolean> {
+  async cancel(id: string, reason = 'user_cancelled'): Promise<boolean> {
     const result = await this.db
       .prepare(
         `UPDATE runs SET status = 'CANCELLED', termination_reason = ?,
@@ -68,7 +84,11 @@ export class RunStore {
     return result.meta.changes === 1;
   }
 
-  async saveDraft(id: string, draft: ArchiveDraft, threadId?: string): Promise<void> {
+  async saveDraft(
+    id: string,
+    draft: ArchiveDraft,
+    threadId?: string,
+  ): Promise<void> {
     await this.db
       .prepare(
         `UPDATE runs SET draft_json = ?, base_commit_sha = ?, thread_id = COALESCE(?, thread_id),
@@ -90,8 +110,12 @@ export class RunStore {
   }
 
   async replaceDraft(id: string, draft: ArchiveDraft): Promise<void> {
-    await this.db.prepare("UPDATE runs SET draft_json = ?, updated_at = ? WHERE id = ? AND status = 'AWAITING_APPROVAL'")
-      .bind(JSON.stringify(draft), new Date().toISOString(), id).run();
+    await this.db
+      .prepare(
+        "UPDATE runs SET draft_json = ?, updated_at = ? WHERE id = ? AND status = 'AWAITING_APPROVAL'",
+      )
+      .bind(JSON.stringify(draft), new Date().toISOString(), id)
+      .run();
   }
 
   async complete(id: string, branch: string, prUrl: string): Promise<void> {
@@ -105,7 +129,12 @@ export class RunStore {
       .run();
   }
 
-  async fail(id: string, from: RunStatus, status: "FAILED_EXTERNAL" | "FAILED_BUDGET", category: string): Promise<void> {
+  async fail(
+    id: string,
+    from: RunStatus,
+    status: 'FAILED_EXTERNAL' | 'FAILED_BUDGET',
+    category: string,
+  ): Promise<void> {
     assertTransition(from, status);
     await this.db
       .prepare(
@@ -129,7 +158,7 @@ export class RunStore {
     return result.meta.changes ?? 0;
   }
 
-  async costSummary(userId: string): Promise<Record<string, number>> {
+  async costSummary(userId: string): Promise<CostSummary> {
     const row = await this.db
       .prepare(
         `SELECT COUNT(*) run_count,
@@ -142,12 +171,17 @@ export class RunStore {
          FROM runs WHERE discord_user_id = ? AND created_at >= datetime('now', 'start of month')`,
       )
       .bind(userId)
-      .first<Record<string, number>>();
-    return row ?? {};
+      .first();
+    return costSummarySchema.parse(row);
   }
 
   async latestForUser(userId: string): Promise<RunRow | null> {
-    return (await this.db.prepare("SELECT * FROM runs WHERE discord_user_id = ? ORDER BY created_at DESC LIMIT 1")
-      .bind(userId).first<RunRow>()) ?? null;
+    const row = await this.db
+      .prepare(
+        'SELECT * FROM runs WHERE discord_user_id = ? ORDER BY created_at DESC LIMIT 1',
+      )
+      .bind(userId)
+      .first();
+    return row ? runRowSchema.parse(row) : null;
   }
 }

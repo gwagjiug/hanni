@@ -174,3 +174,13 @@ OpenTelemetry는 다음 외부 작업을 계측해요.
 - `github.create_archive_draft_pr`
 
 Pin 원문, 전체 URL, Discord 메시지, prompt, response와 secret은 trace attribute에 남기지 않아요. OTLP endpoint를 설정하지 않으면 D1의 상태와 비용 집계만 사용합니다.
+
+## Development
+
+타입, lint, format과 테스트를 한 번에 확인하려면 다음 명령을 실행해요.
+
+```bash
+npm run validate
+```
+
+개별 검사는 `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`로 실행할 수 있어요.

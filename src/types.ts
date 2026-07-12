@@ -20,24 +20,27 @@ export interface Env {
   OTEL_EXPORTER_OTLP_HEADERS?: string;
 }
 
-export type RunStatus =
-  | "RECEIVED"
-  | "VALIDATING"
-  | "ANALYZING"
-  | "AWAITING_APPROVAL"
-  | "CREATING_PR"
-  | "COMPLETED"
-  | "CANCELLED"
-  | "EXPIRED"
-  | "REJECTED_OUT_OF_SCOPE"
-  | "REJECTED_PERMISSION"
-  | "FAILED_EXTERNAL"
-  | "FAILED_BUDGET";
+export const RUN_STATUS = {
+  RECEIVED: 'RECEIVED',
+  VALIDATING: 'VALIDATING',
+  ANALYZING: 'ANALYZING',
+  AWAITING_APPROVAL: 'AWAITING_APPROVAL',
+  CREATING_PR: 'CREATING_PR',
+  COMPLETED: 'COMPLETED',
+  CANCELLED: 'CANCELLED',
+  EXPIRED: 'EXPIRED',
+  REJECTED_OUT_OF_SCOPE: 'REJECTED_OUT_OF_SCOPE',
+  REJECTED_PERMISSION: 'REJECTED_PERMISSION',
+  FAILED_EXTERNAL: 'FAILED_EXTERNAL',
+  FAILED_BUDGET: 'FAILED_BUDGET',
+} as const;
+
+export type RunStatus = (typeof RUN_STATUS)[keyof typeof RUN_STATUS];
 
 export interface ArchivePreparation {
   category: {
     name: string;
-    mode: "existing" | "new";
+    mode: 'existing' | 'new';
     rationale: string;
   };
   prTitle: string;

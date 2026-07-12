@@ -1,4 +1,4 @@
-import type { TokenUsage } from "../types";
+import type { TokenUsage } from '../types';
 
 export interface ModelPrice {
   inputPerMillion: number;
