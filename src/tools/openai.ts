@@ -41,13 +41,13 @@ const jsonSchema = {
       additionalProperties: false,
       required: ['name', 'mode', 'rationale'],
       properties: {
-        name: { type: 'string' },
+        name: { type: 'string', minLength: 1, maxLength: 100 },
         mode: { type: 'string', enum: ['existing', 'new'] },
-        rationale: { type: 'string' },
+        rationale: { type: 'string', minLength: 1, maxLength: 500 },
       },
     },
-    prTitle: { type: 'string' },
-    prBody: { type: 'string' },
+    prTitle: { type: 'string', minLength: 1, maxLength: 256 },
+    prBody: { type: 'string', minLength: 1, maxLength: 10_000 },
   },
 } as const;
 
@@ -55,6 +55,18 @@ export interface PrepareResult {
   preparation: ArchivePreparation;
   usage: TokenUsage;
   calls: number;
+}
+
+function structuredOutputErrorCategory(error: unknown): string {
+  if (error instanceof SyntaxError) {
+    return 'invalid_json';
+  }
+  if (error instanceof z.ZodError) {
+    return `schema:${error.issues
+      .map((issue) => `${issue.path.join('.') || 'root'}:${issue.code}`)
+      .join(',')}`;
+  }
+  return 'unknown';
 }
 
 export async function prepareArchiveEntry(input: {
@@ -69,6 +81,11 @@ export async function prepareArchiveEntry(input: {
 }): Promise<PrepareResult> {
   const fetcher = input.fetcher ?? fetch;
   let lastError: unknown;
+  const usage: TokenUsage = {
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    outputTokens: 0,
+  };
   for (let attempt = 1; attempt <= 2; attempt++) {
     const response = await fetcher('https://api.openai.com/v1/responses', {
       method: 'POST',
@@ -111,6 +128,10 @@ export async function prepareArchiveEntry(input: {
       throw new Error(`openai_http_${response.status}`);
     }
     const data = openAiResponseSchema.parse(await response.json());
+    usage.inputTokens += data.usage?.input_tokens ?? 0;
+    usage.cachedInputTokens +=
+      data.usage?.input_tokens_details?.cached_tokens ?? 0;
+    usage.outputTokens += data.usage?.output_tokens ?? 0;
     const text =
       data.output_text ??
       data.output
@@ -123,15 +144,16 @@ export async function prepareArchiveEntry(input: {
       return {
         preparation,
         calls: attempt,
-        usage: {
-          inputTokens: data.usage?.input_tokens ?? 0,
-          cachedInputTokens:
-            data.usage?.input_tokens_details?.cached_tokens ?? 0,
-          outputTokens: data.usage?.output_tokens ?? 0,
-        },
+        usage,
       };
     } catch (error) {
       lastError = error;
+      console.warn({
+        event: 'hanni.llm.structured_output_invalid',
+        model: input.model,
+        attempt,
+        category: structuredOutputErrorCategory(error),
+      });
     }
   }
   throw new Error(`openai_invalid_structured_output: ${String(lastError)}`);

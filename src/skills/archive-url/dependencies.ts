@@ -36,7 +36,6 @@ export interface ArchiveWorkflowDependencies {
 export function createArchiveWorkflowDependencies(
   env: Env,
   runId: string,
-  defer?: (promise: Promise<unknown>) => void,
 ): ArchiveWorkflowDependencies {
   return {
     store: new RunStore(env.DB),
@@ -44,7 +43,7 @@ export function createArchiveWorkflowDependencies(
     discord: new DiscordClient(env),
     metadata: fetchMetadata,
     prepare: prepareArchiveEntry,
-    tracer: new Tracer(env, runId, defer),
+    tracer: new Tracer(runId),
     circuit: new CircuitBreaker(),
   };
 }

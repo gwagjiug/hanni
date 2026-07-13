@@ -14,6 +14,7 @@ import {
 import { extractCategories, hasUrl } from '../skills/archive-url/render';
 import { parseArchiveWorkflowInput } from '../skills/archive-url/schema';
 import { RunStore } from '../storage/runs';
+import { Tracer } from '../telemetry/tracer';
 import { DiscordClient, previewPayload } from '../tools/discord';
 import { GitHubClient, type ArchiveSnapshot } from '../tools/github/client';
 import { prepareArchiveEntry } from '../tools/openai';
@@ -70,6 +71,7 @@ export class ArchiveAnalysisWorkflow extends WorkflowEntrypoint<
   ): Promise<{ runId: string; status: string }> {
     const { runId } = event.payload;
     const store = new RunStore(this.env.DB);
+    const tracer = new Tracer(runId);
     try {
       const initial = await step.do(
         'validate archive request',
@@ -116,7 +118,11 @@ export class ArchiveAnalysisWorkflow extends WorkflowEntrypoint<
             'archive 저장소를 확인하고 있어요.',
             context.attempt - 1,
           );
-          const archive = await new GitHubClient(this.env).readArchive();
+          const archive = await tracer.span(
+            'github.read_archive',
+            { 'tool.read_write': 'read', 'ax.dimension': 'environment' },
+            () => new GitHubClient(this.env).readArchive(),
+          );
           if (hasUrl(archive.readme, initial.normalizedUrl)) {
             throw new Error('archive_duplicate_url');
           }
@@ -144,7 +150,11 @@ export class ArchiveAnalysisWorkflow extends WorkflowEntrypoint<
             '문서 제목과 canonical URL을 확인하고 있어요.',
             context.attempt - 1,
           );
-          const metadata = await fetchMetadata(initial.normalizedUrl);
+          const metadata = await tracer.span(
+            'web.fetch_metadata',
+            { 'tool.read_write': 'read', 'ax.dimension': 'environment' },
+            () => fetchMetadata(initial.normalizedUrl),
+          );
           const title = metadata.title;
           if (!title) {
             throw new Error('metadata_title_missing');
@@ -164,15 +174,24 @@ export class ArchiveAnalysisWorkflow extends WorkflowEntrypoint<
             '카테고리와 PR 설명을 준비하고 있어요.',
             context.attempt - 1,
           );
-          return prepareArchiveEntry({
-            apiKey: this.env.OPENAI_API_KEY,
-            model: this.env.OPENAI_MODEL,
-            title: document.title,
-            hostname: new URL(document.canonicalUrl).hostname,
-            categories: extractCategories(archive.readme),
-            pins: initial.pins,
-            ...(initial.note ? { note: initial.note } : {}),
-          });
+          return tracer.span(
+            'llm.prepare_entry',
+            {
+              'ax.dimension': 'agent_behavior',
+              model: this.env.OPENAI_MODEL,
+              pin_count: initial.pins.length,
+            },
+            () =>
+              prepareArchiveEntry({
+                apiKey: this.env.OPENAI_API_KEY,
+                model: this.env.OPENAI_MODEL,
+                title: document.title,
+                hostname: new URL(document.canonicalUrl).hostname,
+                categories: extractCategories(archive.readme),
+                pins: initial.pins,
+                ...(initial.note ? { note: initial.note } : {}),
+              }),
+          );
         },
       );
       const cost = estimateCost(llm.usage);

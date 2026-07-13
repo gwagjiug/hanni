@@ -17,8 +17,6 @@ export interface Env {
   ARCHIVE_DEFAULT_BRANCH: string;
   APPROVAL_TTL_HOURS: string;
   MAX_RUN_COST_USD: string;
-  OTEL_EXPORTER_OTLP_ENDPOINT?: string;
-  OTEL_EXPORTER_OTLP_HEADERS?: string;
 }
 
 export const RUN_STATUS = {
