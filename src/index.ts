@@ -8,8 +8,11 @@ import {
   errorResponse,
   InteractionResponseType,
   jsonResponse,
+  DiscordClient,
 } from './tools/discord';
 import type { Env } from './types';
+
+export { ArchiveAnalysisWorkflow } from './workflows/archive-analysis';
 
 export default {
   async fetch(
@@ -50,6 +53,20 @@ export default {
   },
 
   async scheduled(_event: ScheduledEvent, env: Env): Promise<void> {
-    await new RunStore(env.DB).expireOldRuns();
+    const store = new RunStore(env.DB);
+    await store.expireOldRuns();
+    const stale = await store.failStaleRuns(
+      new Date(Date.now() - 5 * 60 * 1_000),
+    );
+    for (const row of stale) {
+      await new DiscordClient(env)
+        .sendMessage(row.channel_id, {
+          content:
+            `Hanni 실행 \`${row.id}\`이(가) ${row.current_step ?? '분석'} 단계에서 ` +
+            '더 진행되지 않아 종료했어요. `/hanni-status`에서 확인해주세요.',
+          allowed_mentions: { parse: [] },
+        })
+        .catch(() => undefined);
+    }
   },
 };

@@ -91,6 +91,8 @@ Hanni는 archive의 기존 형식을 그대로 따릅니다.
 
 승인하지 않은 실행은 24시간 뒤 만료됩니다.
 
+분석 중에는 같은 Discord 응답을 현재 작업에 맞게 갱신해요. `/hanni-status`에서는 현재 작업, 마지막 진행 시각, 재시도 횟수와 Cloudflare Workflow 상태를 확인할 수 있습니다.
+
 ## Safety
 
 Hanni의 행동 범위는 프롬프트만으로 제한하지 않아요.
@@ -121,19 +123,20 @@ Discord HTTP Interaction
         ↓
 Scope & Permission Policy
         ↓
-archive-url workflow
-        ├── Web metadata
-        ├── GitHub read
-        ├── Structured model output
-        ├── Discord preview
-        └── GitHub Draft PR
+Cloudflare Workflow
+        └── archive-url skill
+              ├── Web metadata
+              ├── GitHub read
+              ├── Structured model output
+              ├── Discord preview
+              └── GitHub Draft PR
         ↓
 Cloudflare D1
         ↓
 Cost metrics & OpenTelemetry
 ```
 
-Hanni는 자유형 ReAct loop 대신 명시적인 상태 전이를 사용해요. 자연어 판단이 필요한 카테고리와 PR 문구만 모델에 맡깁니다. URL 검증, Markdown 생성, 권한, 승인, GitHub 쓰기는 코드가 처리해요.
+Hanni는 자유형 ReAct loop 대신 명시적인 상태 전이를 사용해요. 분석은 Cloudflare Workflow의 개별 단계로 실행하므로 Worker 요청이 끝난 뒤에도 상태를 보존하고, 실패한 외부 조회는 정해진 범위에서만 재시도합니다. 자연어 판단이 필요한 카테고리와 PR 문구만 모델에 맡기고 URL 검증, Markdown 생성, 권한, 승인, GitHub 쓰기는 코드가 처리해요.
 
 ```text
 RECEIVED
@@ -158,12 +161,20 @@ src/
 ├── storage/        # D1 run store
 ├── telemetry/      # OTLP trace와 redaction
 ├── tools/          # Discord, GitHub, OpenAI, Web
+├── workflows/      # durable archive 분석 단계
 └── index.ts        # Discord Interaction entrypoint
 ```
 
 ## Observability
 
 OpenAI 응답의 input, cached input, output token을 바탕으로 실행 비용을 추정해요. `/hanni-cost`에서는 이번 달 실행 수, 성공과 실패, token 합계, 예상 비용, 가장 큰 실행 비용을 확인할 수 있습니다.
+
+D1에는 큰 실행 상태와 함께 `current_step`, `last_heartbeat_at`, `retry_count`, `workflow_instance_id`를 저장해요. 5분 동안 heartbeat가 없는 분석 실행은 cron이 `FAILED_TIMEOUT`으로 종료합니다. 단계별 구조화 로그와 Worker invocation log는 Cloudflare Workers Logs에서 확인할 수 있어요.
+
+```bash
+npx wrangler tail hanni
+npx wrangler workflows instances describe hanni-archive-analysis latest
+```
 
 OpenTelemetry는 다음 외부 작업을 계측해요.
 

@@ -42,5 +42,6 @@ describe('input, budget and state', () => {
     expect(canTransition('AWAITING_APPROVAL', 'CREATING_PR')).toBe(true);
     expect(canTransition('CREATING_PR', 'COMPLETED')).toBe(true);
     expect(canTransition('COMPLETED', 'CREATING_PR')).toBe(false);
+    expect(canTransition('ANALYZING', 'FAILED_TIMEOUT')).toBe(true);
   });
 });

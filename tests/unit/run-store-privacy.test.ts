@@ -34,6 +34,7 @@ describe('RunStore terminal-state privacy', () => {
     expect(statements[0]).toContain('interaction_token = NULL');
     expect(statements[0]).toContain('source_url = NULL');
     expect(statements[0]).toContain('draft_json = NULL');
+    expect(statements[0]).toContain('workflow_input_json = NULL');
   });
 
   it('removes user content and interaction credentials on failure', async () => {
@@ -42,5 +43,6 @@ describe('RunStore terminal-state privacy', () => {
     expect(statements[0]).toContain('interaction_token = NULL');
     expect(statements[0]).toContain('source_url = NULL');
     expect(statements[0]).toContain('draft_json = NULL');
+    expect(statements[0]).toContain('workflow_input_json = NULL');
   });
 });

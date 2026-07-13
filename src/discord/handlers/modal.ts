@@ -51,10 +51,7 @@ export async function handleModal(
       return errorResponse(OUT_OF_SCOPE_MESSAGE);
     }
     const note = componentValue(interaction.data, 'note').trim();
-    const defer = (promise: Promise<unknown>) => ctx.waitUntil(promise);
-    ctx.waitUntil(
-      createAndAnalyze(env, interaction, runId, url, pins, note, defer),
-    );
+    ctx.waitUntil(createAndAnalyze(env, interaction, runId, url, pins, note));
     return jsonResponse({
       type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE,
       data: { allowed_mentions: { parse: [] } },

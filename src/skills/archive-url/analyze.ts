@@ -1,18 +1,10 @@
-import { estimateCost } from '../../agent/budget';
 import { normalizePublicUrl } from '../../policies/scope';
 import { previewPayload } from '../../tools/discord';
-import type { ArchiveDraft, Env } from '../../types';
+import type { Env } from '../../types';
+import { createArchiveDraft } from './draft';
 import { createArchiveWorkflowDependencies } from './dependencies';
 import { errorCategory, isBudgetFailure, userFacingError } from './errors';
-import {
-  archiveEntry,
-  extractCategories,
-  hasUrl,
-  insertReadmeEntry,
-  renderPinFile,
-  shortHash,
-  slugify,
-} from './render';
+import { extractCategories, hasUrl } from './render';
 
 export async function analyzeArchiveUrl(
   env: Env,
@@ -75,37 +67,18 @@ export async function analyzeArchiveUrl(
         }),
     );
     circuit.usage(llm.usage);
-    const cost = estimateCost(llm.usage);
+    const draft = await createArchiveDraft({
+      runId: row.id,
+      pins: input.pins,
+      model: env.OPENAI_MODEL,
+      archive,
+      document,
+      llm,
+    });
+    const cost = draft.estimatedCostUsd;
     if (cost > Number(env.MAX_RUN_COST_USD)) {
       throw new Error('max_cost_exceeded');
     }
-
-    let slug = slugify(title);
-    if (archive.files.has(`pins/${slug}.md`)) {
-      slug = `${slug}-${await shortHash(document.canonicalUrl)}`;
-    }
-    const pinPath = `pins/${slug}.md`;
-    const draft: ArchiveDraft = {
-      runId: row.id,
-      title,
-      url: document.canonicalUrl,
-      pins: input.pins,
-      slug,
-      pinPath,
-      pinContent: renderPinFile(title, document.canonicalUrl, input.pins),
-      readmeBefore: archive.readme,
-      readmeAfter: insertReadmeEntry(
-        archive.readme,
-        llm.preparation.category.name,
-        archiveEntry(title, document.canonicalUrl, slug),
-      ),
-      baseCommitSha: archive.baseCommitSha,
-      baseTreeSha: archive.baseTreeSha,
-      model: env.OPENAI_MODEL,
-      usage: llm.usage,
-      estimatedCostUsd: cost,
-      ...llm.preparation,
-    };
 
     circuit.tool('discord.publish_preview', row.id);
     const original = await discord.editOriginal(row.interaction_token, {

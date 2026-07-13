@@ -6,14 +6,21 @@ const transitions: Record<RunStatus, readonly RunStatus[]> = {
     'CANCELLED',
     'REJECTED_OUT_OF_SCOPE',
     'REJECTED_PERMISSION',
+    'FAILED_EXTERNAL',
   ],
   VALIDATING: [
     'ANALYZING',
     'CANCELLED',
     'REJECTED_OUT_OF_SCOPE',
     'FAILED_EXTERNAL',
+    'FAILED_TIMEOUT',
   ],
-  ANALYZING: ['AWAITING_APPROVAL', 'FAILED_EXTERNAL', 'FAILED_BUDGET'],
+  ANALYZING: [
+    'AWAITING_APPROVAL',
+    'FAILED_EXTERNAL',
+    'FAILED_BUDGET',
+    'FAILED_TIMEOUT',
+  ],
   AWAITING_APPROVAL: ['CREATING_PR', 'CANCELLED', 'EXPIRED'],
   CREATING_PR: ['COMPLETED', 'FAILED_EXTERNAL', 'FAILED_BUDGET'],
   COMPLETED: [],
@@ -23,6 +30,7 @@ const transitions: Record<RunStatus, readonly RunStatus[]> = {
   REJECTED_PERMISSION: [],
   FAILED_EXTERNAL: [],
   FAILED_BUDGET: [],
+  FAILED_TIMEOUT: [],
 };
 
 export function canTransition(from: RunStatus, to: RunStatus): boolean {

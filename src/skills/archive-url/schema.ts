@@ -36,6 +36,15 @@ export const archiveDraftSchema = archivePreparationSchema.extend({
   estimatedCostUsd: z.number().nonnegative(),
 });
 
+export const archiveWorkflowInputSchema = z.object({
+  pins: z.array(z.string().min(1).max(2_000)).min(1).max(10),
+  note: z.string().max(1_000).optional(),
+});
+
 export function parseArchiveDraft(value: string) {
   return archiveDraftSchema.parse(JSON.parse(value));
+}
+
+export function parseArchiveWorkflowInput(value: string) {
+  return archiveWorkflowInputSchema.parse(JSON.parse(value));
 }

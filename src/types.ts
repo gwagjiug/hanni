@@ -1,5 +1,6 @@
 export interface Env {
   DB: D1Database;
+  ARCHIVE_WORKFLOW: Workflow<ArchiveWorkflowParams>;
   DISCORD_APPLICATION_ID: string;
   DISCORD_PUBLIC_KEY: string;
   DISCORD_BOT_TOKEN: string;
@@ -33,9 +34,19 @@ export const RUN_STATUS = {
   REJECTED_PERMISSION: 'REJECTED_PERMISSION',
   FAILED_EXTERNAL: 'FAILED_EXTERNAL',
   FAILED_BUDGET: 'FAILED_BUDGET',
+  FAILED_TIMEOUT: 'FAILED_TIMEOUT',
 } as const;
 
 export type RunStatus = (typeof RUN_STATUS)[keyof typeof RUN_STATUS];
+
+export interface ArchiveWorkflowParams {
+  runId: string;
+}
+
+export interface ArchiveWorkflowInput {
+  pins: string[];
+  note?: string;
+}
 
 export interface ArchivePreparation {
   category: {
@@ -91,6 +102,12 @@ export interface RunRow {
   github_branch: string | null;
   github_pr_url: string | null;
   error_category: string | null;
+  workflow_instance_id: string | null;
+  workflow_input_json: string | null;
+  current_step: string | null;
+  step_started_at: string | null;
+  last_heartbeat_at: string | null;
+  retry_count: number;
   created_at: string;
   updated_at: string;
   expires_at: string;

@@ -1,4 +1,5 @@
 import { normalizePublicUrl, OUT_OF_SCOPE_MESSAGE } from '../../policies/scope';
+import { formatRunStatus } from '../../agent/progress';
 import { RunStore } from '../../storage/runs';
 import { parsePins, validatePins } from '../../skills/archive-url/input';
 import {
@@ -34,9 +35,18 @@ export async function handleCommand(
   }
   if (interaction.data?.name === 'hanni-status') {
     const latest = await store.latestForUser(userId);
+    let workflowStatus: string | undefined;
+    if (latest?.workflow_instance_id) {
+      workflowStatus = await env.ARCHIVE_WORKFLOW.get(
+        latest.workflow_instance_id,
+      )
+        .then((instance) => instance.status())
+        .then((status) => status.status)
+        .catch(() => '조회 실패');
+    }
     return errorResponse(
       latest
-        ? `최근 실행 \`${latest.id}\`: **${latest.status}**${latest.github_pr_url ? `\n${latest.github_pr_url}` : ''}`
+        ? formatRunStatus(latest, workflowStatus)
         : '아직 Hanni 실행 기록이 없어요.',
     );
   }
@@ -72,10 +82,7 @@ export async function handleCommand(
     );
   }
   const runId = crypto.randomUUID();
-  const defer = (promise: Promise<unknown>) => ctx.waitUntil(promise);
-  ctx.waitUntil(
-    createAndAnalyze(env, interaction, runId, url, pins, '', defer),
-  );
+  ctx.waitUntil(createAndAnalyze(env, interaction, runId, url, pins, ''));
   return jsonResponse({
     type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE,
     data: { allowed_mentions: { parse: [] } },

@@ -1,7 +1,3 @@
-import {
-  analyzeArchiveUrl,
-  createArchiveWorkflowDependencies,
-} from '../skills/archive-url/run';
 import { RunStore } from '../storage/runs';
 import { DiscordClient } from '../tools/discord';
 import type { Env } from '../types';
@@ -18,7 +14,6 @@ export async function createAndAnalyze(
   url: string,
   pins: string[],
   note: string,
-  defer: (promise: Promise<unknown>) => void,
 ): Promise<void> {
   const store = new RunStore(env.DB);
   try {
@@ -30,6 +25,7 @@ export async function createAndAnalyze(
       interactionToken: interaction.token,
       sourceUrl: url,
       urlHash: await normalizedUrlHash(url),
+      workflowInput: { pins, ...(note ? { note } : {}) },
       ttlHours: Number(env.APPROVAL_TTL_HOURS),
     });
   } catch (error) {
@@ -44,9 +40,27 @@ export async function createAndAnalyze(
       .catch(() => undefined);
     return;
   }
-  await analyzeArchiveUrl(
-    env,
-    { runId, pins, ...(note ? { note } : {}) },
-    createArchiveWorkflowDependencies(env, runId, defer),
-  );
+  try {
+    const instance = await env.ARCHIVE_WORKFLOW.create({
+      id: runId,
+      params: { runId },
+      retention: { successRetention: '7 days', errorRetention: '7 days' },
+    });
+    await store.setWorkflowInstance(runId, instance.id);
+  } catch (error) {
+    const category = 'workflow_start_failed';
+    await new DiscordClient(env)
+      .editOriginal(interaction.token, {
+        content: '분석 작업을 시작하지 못했어요. 잠시 후 다시 시도해주세요.',
+        allowed_mentions: { parse: [] },
+      })
+      .catch(() => undefined);
+    await store.fail(runId, 'RECEIVED', 'FAILED_EXTERNAL', category);
+    console.error({
+      event: 'hanni.workflow.start_failed',
+      runId,
+      errorCategory: category,
+      cause: error instanceof Error ? error.name : 'unknown',
+    });
+  }
 }
