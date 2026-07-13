@@ -53,13 +53,12 @@ export async function handleComponent(
   }
   if (action === 'approve') {
     const discord = new DiscordClient(env);
-    const defer = (promise: Promise<unknown>) => ctx.waitUntil(promise);
     ctx.waitUntil(
       approveDraft(
         env,
         runId!,
         userId,
-        createArchiveWorkflowDependencies(env, runId!, defer),
+        createArchiveWorkflowDependencies(env, runId!),
       )
         .then((result) =>
           discord.sendMessage(row.thread_id ?? row.channel_id, {

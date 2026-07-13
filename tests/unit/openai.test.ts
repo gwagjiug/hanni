@@ -66,6 +66,62 @@ describe('OpenAI boundary', () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it('accumulates usage across a structured-output retry', async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            output_text: 'not-json',
+            usage: {
+              input_tokens: 100,
+              output_tokens: 10,
+              input_tokens_details: { cached_tokens: 5 },
+            },
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            output_text: JSON.stringify({
+              category: {
+                name: 'AI',
+                mode: 'existing',
+                rationale: 'fit',
+              },
+              prTitle: 'archive: add article',
+              prBody: 'Adds an article.',
+            }),
+            usage: {
+              input_tokens: 120,
+              output_tokens: 20,
+              input_tokens_details: { cached_tokens: 10 },
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+
+    const result = await prepareArchiveEntry({
+      apiKey: 'x',
+      model: 'm',
+      title: 't',
+      hostname: 'example.com',
+      categories: ['AI'],
+      pins: ['p'],
+      fetcher,
+    });
+
+    expect(result.calls).toBe(2);
+    expect(result.usage).toEqual({
+      inputTokens: 220,
+      cachedInputTokens: 15,
+      outputTokens: 30,
+    });
+  });
+
   it('rejects a provider response with an invalid usage contract', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

@@ -176,7 +176,9 @@ npx wrangler tail hanni
 npx wrangler workflows instances describe hanni-archive-analysis latest
 ```
 
-OpenTelemetry는 다음 외부 작업을 계측해요.
+Cloudflare Workers tracing은 Worker와 Workflow 실행, 외부 `fetch`, D1 호출을
+자동으로 계측해 Cloudflare Dashboard에 저장해요. Hanni는 다음 외부 작업에
+업무 이름을 붙인 custom span도 남깁니다.
 
 - `github.read_archive`
 - `web.fetch_metadata`
@@ -184,7 +186,9 @@ OpenTelemetry는 다음 외부 작업을 계측해요.
 - `github.revalidate`
 - `github.create_archive_draft_pr`
 
-Pin 원문, 전체 URL, Discord 메시지, prompt, response와 secret은 trace attribute에 남기지 않아요. OTLP endpoint를 설정하지 않으면 D1의 상태와 비용 집계만 사용합니다.
+Hanni가 직접 추가하는 custom span에는 실행 ID, 읽기·쓰기 구분, 모델명, Pin
+개수처럼 제한된 정보만 기록하며 Pin 원문, prompt, response와 secret은 넣지
+않아요.
 
 ## Development
 
