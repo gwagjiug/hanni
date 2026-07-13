@@ -1,0 +1,40 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hanni",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-13",
+  "compatibility_flags": ["nodejs_compat"],
+  "triggers": {
+    "crons": ["*/5 * * * *"],
+  },
+  "workflows": [
+    {
+      "name": "hanni-archive-analysis",
+      "binding": "ARCHIVE_WORKFLOW",
+      "class_name": "ArchiveAnalysisWorkflow",
+    },
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "invocation_logs": true,
+    },
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "hanni",
+      "database_id": "48d9e402-66ea-4602-9c53-e956c227c1f2",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "vars": {
+    "ARCHIVE_OWNER": "gwagjiug",
+    "ARCHIVE_REPO": "archive",
+    "ARCHIVE_DEFAULT_BRANCH": "main",
+    "OPENAI_MODEL": "gpt-5-mini-2025-08-07",
+    "APPROVAL_TTL_HOURS": "24",
+    "MAX_RUN_COST_USD": "0.03",
+  },
+}
