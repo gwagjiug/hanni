@@ -20,3 +20,14 @@ export function userFacingError(error: unknown): string {
   }
   return `변경안을 준비하지 못했어요. 오류 분류: \`${category}\``;
 }
+
+export function approvalFailureMessage(error: unknown): string {
+  const category = errorCategory(error);
+  if (category === 'pr_created_but_completion_state_conflicted') {
+    return (
+      'Draft PR은 생성됐지만 Hanni 실행 상태 저장에 실패했어요. ' +
+      `GitHub에서 PR을 확인해주세요. 오류 분류: \`${category}\``
+    );
+  }
+  return `PR을 만들지 못했어요. 오류 분류: \`${category}\``;
+}

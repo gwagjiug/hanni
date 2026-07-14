@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { estimateCost } from '../../src/agent/budget';
-import { canTransition } from '../../src/agent/state';
+import { canTransition, isTerminalRunStatus } from '../../src/agent/state';
 import { parsePins, validatePins } from '../../src/skills/archive-url/input';
 
 describe('input, budget and state', () => {
@@ -43,5 +43,12 @@ describe('input, budget and state', () => {
     expect(canTransition('CREATING_PR', 'COMPLETED')).toBe(true);
     expect(canTransition('COMPLETED', 'CREATING_PR')).toBe(false);
     expect(canTransition('ANALYZING', 'FAILED_TIMEOUT')).toBe(true);
+  });
+
+  it('classifies only states with no outgoing transitions as terminal', () => {
+    expect(isTerminalRunStatus('ANALYZING')).toBe(false);
+    expect(isTerminalRunStatus('COMPLETED')).toBe(true);
+    expect(isTerminalRunStatus('EXPIRED')).toBe(true);
+    expect(isTerminalRunStatus('FAILED_EXTERNAL')).toBe(true);
   });
 });
