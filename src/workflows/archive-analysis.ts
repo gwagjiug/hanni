@@ -165,7 +165,11 @@ export class ArchiveAnalysisWorkflow extends WorkflowEntrypoint<
 
       const llm = await step.do(
         'classify archive entry',
-        { timeout: '2 minutes', sensitive: 'output' },
+        {
+          retries: { limit: 0, delay: '1 second', backoff: 'constant' },
+          timeout: '2 minutes',
+          sensitive: 'output',
+        },
         async (context) => {
           await reportProgress(
             this.env,
@@ -190,6 +194,8 @@ export class ArchiveAnalysisWorkflow extends WorkflowEntrypoint<
                 categories: extractCategories(archive.readme),
                 pins: initial.pins,
                 ...(initial.note ? { note: initial.note } : {}),
+                onUsage: (usage) =>
+                  store.recordUsageAttempt(runId, usage, estimateCost(usage)),
               }),
           );
         },

@@ -42,6 +42,7 @@ describe('OpenAI boundary', () => {
     const sent = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body));
     expect(sent.input[0].content).toContain('not a chatbot');
     expect(sent.input[0].content).toContain('naturally in Korean');
+    expect(sent.reasoning).toEqual({ effort: 'minimal' });
     expect(sent.tools).toBeUndefined();
   });
 
@@ -67,6 +68,7 @@ describe('OpenAI boundary', () => {
   });
 
   it('accumulates usage across a structured-output retry', async () => {
+    const onUsage = vi.fn(async () => undefined);
     const fetcher = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
@@ -112,6 +114,7 @@ describe('OpenAI boundary', () => {
       categories: ['AI'],
       pins: ['p'],
       fetcher,
+      onUsage,
     });
 
     expect(result.calls).toBe(2);
@@ -120,6 +123,73 @@ describe('OpenAI boundary', () => {
       cachedInputTokens: 15,
       outputTokens: 30,
     });
+    expect(onUsage).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports an incomplete response without retrying it', async () => {
+    const onUsage = vi.fn(async () => undefined);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: 'incomplete',
+          incomplete_details: { reason: 'max_output_tokens' },
+          output: [],
+          usage: { input_tokens: 100, output_tokens: 1200 },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await expect(
+      prepareArchiveEntry({
+        apiKey: 'x',
+        model: 'm',
+        title: 't',
+        hostname: 'example.com',
+        categories: [],
+        pins: ['p'],
+        fetcher,
+        onUsage,
+      }),
+    ).rejects.toThrow('openai_incomplete:max_output_tokens');
+
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(onUsage).toHaveBeenCalledWith({
+      inputTokens: 100,
+      cachedInputTokens: 0,
+      outputTokens: 1200,
+    });
+  });
+
+  it('reports a refusal without retrying it', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: 'completed',
+          output: [
+            {
+              content: [{ type: 'refusal', refusal: 'not included in logs' }],
+            },
+          ],
+          usage: {},
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await expect(
+      prepareArchiveEntry({
+        apiKey: 'x',
+        model: 'm',
+        title: 't',
+        hostname: 'example.com',
+        categories: [],
+        pins: ['p'],
+        fetcher,
+      }),
+    ).rejects.toThrow('openai_refusal');
+
+    expect(fetcher).toHaveBeenCalledOnce();
   });
 
   it('rejects a provider response with an invalid usage contract', async () => {

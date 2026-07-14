@@ -147,7 +147,11 @@ RECEIVED
 → COMPLETED
 ```
 
-모델 출력은 JSON Schema와 Zod로 검증하고, 구조화 출력이 잘못된 경우에만 한 번 재시도해요. 실행 상태와 승인 대기 데이터, token 사용량과 예상 비용은 D1에 저장합니다.
+모델 출력은 JSON Schema와 Zod로 검증하고, JSON 또는 schema가 잘못된 경우에만
+애플리케이션 안에서 한 번 재시도해요. 모델 단계의 Workflow 자동 재시도는
+사용하지 않아 중첩 호출을 막습니다. 불완전 응답과 refusal은 반복하지 않고
+실패 원인을 구분하며, 성공 여부와 관계없이 API가 반환한 token 사용량과 예상
+비용을 D1에 기록합니다.
 
 ### Repository layout
 
@@ -159,7 +163,7 @@ src/
 ├── policies/       # URL, scope, 권한
 ├── skills/         # archive-url workflow
 ├── storage/        # D1 run store
-├── telemetry/      # OTLP trace와 redaction
+├── telemetry/      # Cloudflare custom span과 attribute redaction
 ├── tools/          # Discord, GitHub, OpenAI, Web
 ├── workflows/      # durable archive 분석 단계
 └── index.ts        # Discord Interaction entrypoint
