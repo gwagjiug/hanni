@@ -3,6 +3,20 @@ import type { ArchivePreparation, TokenUsage } from '../types';
 import { archivePreparationSchema } from '../skills/archive-url/schema';
 
 const openAiResponseSchema = z.object({
+  status: z
+    .enum([
+      'completed',
+      'failed',
+      'in_progress',
+      'cancelled',
+      'queued',
+      'incomplete',
+    ])
+    .optional(),
+  incomplete_details: z
+    .object({ reason: z.string().min(1) })
+    .nullable()
+    .optional(),
   output_text: z.string().optional(),
   output: z
     .array(
@@ -12,6 +26,7 @@ const openAiResponseSchema = z.object({
             z.object({
               type: z.string().optional(),
               text: z.string().optional(),
+              refusal: z.string().optional(),
             }),
           )
           .optional(),
@@ -57,7 +72,19 @@ export interface PrepareResult {
   calls: number;
 }
 
+class OpenAIOutputError extends Error {
+  constructor(
+    readonly category: string,
+    readonly retryable: boolean,
+  ) {
+    super(category);
+  }
+}
+
 function structuredOutputErrorCategory(error: unknown): string {
+  if (error instanceof OpenAIOutputError) {
+    return error.category;
+  }
   if (error instanceof SyntaxError) {
     return 'invalid_json';
   }
@@ -78,6 +105,7 @@ export async function prepareArchiveEntry(input: {
   pins: string[];
   note?: string;
   fetcher?: typeof fetch;
+  onUsage?: (usage: TokenUsage) => Promise<void>;
 }): Promise<PrepareResult> {
   const fetcher = input.fetcher ?? fetch;
   let lastError: unknown;
@@ -96,6 +124,7 @@ export async function prepareArchiveEntry(input: {
       body: JSON.stringify({
         model: input.model,
         max_output_tokens: 1200,
+        reasoning: { effort: 'minimal' },
         input: [
           {
             role: 'system',
@@ -128,19 +157,36 @@ export async function prepareArchiveEntry(input: {
       throw new Error(`openai_http_${response.status}`);
     }
     const data = openAiResponseSchema.parse(await response.json());
-    usage.inputTokens += data.usage?.input_tokens ?? 0;
-    usage.cachedInputTokens +=
-      data.usage?.input_tokens_details?.cached_tokens ?? 0;
-    usage.outputTokens += data.usage?.output_tokens ?? 0;
-    const text =
-      data.output_text ??
-      data.output
-        ?.flatMap((item) => item.content ?? [])
-        .find((item) => item.type === 'output_text')?.text;
+    const attemptUsage: TokenUsage = {
+      inputTokens: data.usage?.input_tokens ?? 0,
+      cachedInputTokens: data.usage?.input_tokens_details?.cached_tokens ?? 0,
+      outputTokens: data.usage?.output_tokens ?? 0,
+    };
+    usage.inputTokens += attemptUsage.inputTokens;
+    usage.cachedInputTokens += attemptUsage.cachedInputTokens;
+    usage.outputTokens += attemptUsage.outputTokens;
+    await input.onUsage?.(attemptUsage);
     try {
-      const preparation = archivePreparationSchema.parse(
-        JSON.parse(text ?? ''),
-      );
+      if (data.status === 'incomplete') {
+        throw new OpenAIOutputError(
+          `incomplete:${data.incomplete_details?.reason ?? 'unknown'}`,
+          false,
+        );
+      }
+      if (data.status && data.status !== 'completed') {
+        throw new OpenAIOutputError(`status:${data.status}`, false);
+      }
+      const content = data.output?.flatMap((item) => item.content ?? []) ?? [];
+      if (content.some((item) => item.type === 'refusal')) {
+        throw new OpenAIOutputError('refusal', false);
+      }
+      const text =
+        data.output_text ??
+        content.find((item) => item.type === 'output_text')?.text;
+      if (!text) {
+        throw new OpenAIOutputError('output_text_missing', false);
+      }
+      const preparation = archivePreparationSchema.parse(JSON.parse(text));
       return {
         preparation,
         calls: attempt,
@@ -154,6 +200,9 @@ export async function prepareArchiveEntry(input: {
         attempt,
         category: structuredOutputErrorCategory(error),
       });
+      if (error instanceof OpenAIOutputError && !error.retryable) {
+        throw new Error(`openai_${error.category}`);
+      }
     }
   }
   throw new Error(`openai_invalid_structured_output: ${String(lastError)}`);

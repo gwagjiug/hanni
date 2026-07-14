@@ -202,6 +202,30 @@ export class RunStore {
       .run();
   }
 
+  async recordUsageAttempt(
+    id: string,
+    usage: ArchiveDraft['usage'],
+    estimatedCostUsd: number,
+  ): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE runs SET llm_calls = llm_calls + 1,
+         input_tokens = input_tokens + ?, cached_input_tokens = cached_input_tokens + ?,
+         output_tokens = output_tokens + ?, estimated_cost_usd = estimated_cost_usd + ?,
+         last_heartbeat_at = ?, updated_at = ? WHERE id = ? AND status = 'ANALYZING'`,
+      )
+      .bind(
+        usage.inputTokens,
+        usage.cachedInputTokens,
+        usage.outputTokens,
+        estimatedCostUsd,
+        new Date().toISOString(),
+        new Date().toISOString(),
+        id,
+      )
+      .run();
+  }
+
   async replaceDraft(id: string, draft: ArchiveDraft): Promise<void> {
     await this.db
       .prepare(
