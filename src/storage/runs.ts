@@ -1,11 +1,11 @@
-import { assertTransition } from '../agent/state';
+import { assertTransition, isTerminalRunStatus } from '../agent/state';
 import type {
   ArchiveDraft,
   ArchiveWorkflowInput,
   RunRow,
   RunStatus,
 } from '../types';
-import { costSummarySchema, runRowSchema, type CostSummary } from './schema';
+import { runRowSchema } from './schema';
 
 export class RunStore {
   constructor(private readonly db: D1Database) {}
@@ -75,40 +75,6 @@ export class RunStore {
       .run();
   }
 
-  async progress(
-    id: string,
-    step: string,
-    detail: string,
-    retryCount = 0,
-  ): Promise<void> {
-    const now = new Date().toISOString();
-    const row = await this.get(id);
-    if (!row) {
-      return;
-    }
-    await this.db.batch([
-      this.db
-        .prepare(
-          `UPDATE runs SET current_step = ?, step_started_at = ?, last_heartbeat_at = ?,
-           retry_count = ?, updated_at = ? WHERE id = ?`,
-        )
-        .bind(step, now, now, retryCount, now, id),
-      this.db
-        .prepare(
-          `INSERT INTO run_events (run_id, event_type, step, status, detail, created_at)
-           VALUES (?, 'STEP_STARTED', ?, ?, ?, ?)`,
-        )
-        .bind(id, step, row.status, detail.slice(0, 300), now),
-    ]);
-    console.log({
-      event: 'hanni.step.started',
-      runId: id,
-      status: row.status,
-      step,
-      retryCount,
-    });
-  }
-
   async transition(
     id: string,
     from: RunStatus,
@@ -116,10 +82,14 @@ export class RunStore {
     reason?: string,
   ): Promise<boolean> {
     assertTransition(from, to);
+    const terminalCleanup = isTerminalRunStatus(to)
+      ? `, interaction_token = NULL, source_url = NULL, draft_json = NULL,
+         workflow_input_json = NULL`
+      : '';
     const result = await this.db
       .prepare(
         `UPDATE runs SET status = ?, termination_reason = ?, current_step = ?,
-         step_started_at = ?, last_heartbeat_at = ?, updated_at = ?
+         step_started_at = ?, last_heartbeat_at = ?, updated_at = ?${terminalCleanup}
          WHERE id = ? AND status = ?`,
       )
       .bind(
@@ -235,8 +205,9 @@ export class RunStore {
       .run();
   }
 
-  async complete(id: string, branch: string, prUrl: string): Promise<void> {
-    await this.db
+  async complete(id: string, branch: string, prUrl: string): Promise<boolean> {
+    assertTransition('CREATING_PR', 'COMPLETED');
+    const result = await this.db
       .prepare(
         `UPDATE runs SET status = 'COMPLETED', github_branch = ?, github_pr_url = ?,
          interaction_token = NULL, source_url = NULL, draft_json = NULL, workflow_input_json = NULL,
@@ -245,6 +216,7 @@ export class RunStore {
       )
       .bind(branch, prUrl, new Date().toISOString(), id)
       .run();
+    return result.meta.changes === 1;
   }
 
   async fail(
@@ -252,9 +224,9 @@ export class RunStore {
     from: RunStatus,
     status: 'FAILED_EXTERNAL' | 'FAILED_BUDGET' | 'FAILED_TIMEOUT',
     category: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     assertTransition(from, status);
-    await this.db
+    const result = await this.db
       .prepare(
         `UPDATE runs SET status = ?, error_category = ?, termination_reason = ?,
          interaction_token = NULL, source_url = NULL, draft_json = NULL, workflow_input_json = NULL,
@@ -271,6 +243,7 @@ export class RunStore {
         from,
       )
       .run();
+    return result.meta.changes === 1;
   }
 
   async expireOldRuns(): Promise<number> {
@@ -313,23 +286,6 @@ export class RunStore {
       }
     }
     return failed;
-  }
-
-  async costSummary(userId: string): Promise<CostSummary> {
-    const row = await this.db
-      .prepare(
-        `SELECT COUNT(*) run_count,
-          SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) completed_count,
-          SUM(CASE WHEN status LIKE 'FAILED_%' THEN 1 ELSE 0 END) failed_count,
-          COALESCE(SUM(input_tokens), 0) input_tokens,
-          COALESCE(SUM(output_tokens), 0) output_tokens,
-          COALESCE(SUM(estimated_cost_usd), 0) estimated_cost_usd,
-          COALESCE(MAX(estimated_cost_usd), 0) max_cost_usd
-         FROM runs WHERE discord_user_id = ? AND created_at >= datetime('now', 'start of month')`,
-      )
-      .bind(userId)
-      .first();
-    return costSummarySchema.parse(row);
   }
 
   async latestForUser(userId: string): Promise<RunRow | null> {

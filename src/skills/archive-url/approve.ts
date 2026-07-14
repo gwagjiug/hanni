@@ -76,7 +76,9 @@ export async function approveDraft(
           pinContent,
         }),
     );
-    await store.complete(runId, result.branch, result.prUrl);
+    if (!(await store.complete(runId, result.branch, result.prUrl))) {
+      throw new Error('pr_created_but_completion_state_conflicted');
+    }
     return result;
   } catch (error) {
     const category = errorCategory(error);

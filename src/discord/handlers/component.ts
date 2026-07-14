@@ -1,3 +1,4 @@
+import { approvalFailureMessage } from '../../skills/archive-url/errors';
 import {
   approveDraft,
   createArchiveWorkflowDependencies,
@@ -68,7 +69,7 @@ export async function handleComponent(
         )
         .catch((error) =>
           discord.sendMessage(row.thread_id ?? row.channel_id, {
-            content: `PR을 만들지 못했어요: \`${String(error).slice(0, 150)}\``,
+            content: approvalFailureMessage(error),
             allowed_mentions: { parse: [] },
           }),
         ),

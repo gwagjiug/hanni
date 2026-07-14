@@ -1,5 +1,6 @@
 import { normalizePublicUrl, OUT_OF_SCOPE_MESSAGE } from '../../policies/scope';
 import { formatRunStatus } from '../../agent/progress';
+import { RunMetricsStore } from '../../storage/run-metrics';
 import { RunStore } from '../../storage/runs';
 import { parsePins, validatePins } from '../../skills/archive-url/input';
 import {
@@ -26,7 +27,7 @@ export async function handleCommand(
   const store = new RunStore(env.DB);
   const userId = interactionUserId(interaction);
   if (interaction.data?.name === 'hanni-cost') {
-    const summary = await store.costSummary(userId);
+    const summary = await new RunMetricsStore(env.DB).costSummary(userId);
     return errorResponse(
       `이번 달 Hanni 사용량\n실행 ${summary.run_count ?? 0}회 · 완료 ${summary.completed_count ?? 0}회 · 실패 ${summary.failed_count ?? 0}회\n` +
         `입력 ${summary.input_tokens ?? 0} tokens · 출력 ${summary.output_tokens ?? 0} tokens\n` +

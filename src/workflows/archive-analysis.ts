@@ -13,6 +13,7 @@ import {
 } from '../skills/archive-url/errors';
 import { extractCategories, hasUrl } from '../skills/archive-url/render';
 import { parseArchiveWorkflowInput } from '../skills/archive-url/schema';
+import { RunProgressStore } from '../storage/run-progress';
 import { RunStore } from '../storage/runs';
 import { Tracer } from '../telemetry/tracer';
 import { DiscordClient, previewPayload } from '../tools/discord';
@@ -41,7 +42,8 @@ async function reportProgress(
   retryCount = 0,
 ): Promise<void> {
   const store = new RunStore(env.DB);
-  await store.progress(runId, stepName, message, retryCount);
+  const progress = new RunProgressStore(env.DB);
+  await progress.progress(runId, stepName, message, retryCount);
   const row = await store.get(runId);
   if (!row?.interaction_token) {
     return;
@@ -71,6 +73,7 @@ export class ArchiveAnalysisWorkflow extends WorkflowEntrypoint<
   ): Promise<{ runId: string; status: string }> {
     const { runId } = event.payload;
     const store = new RunStore(this.env.DB);
+    const progressStore = new RunProgressStore(this.env.DB);
     const tracer = new Tracer(runId);
     try {
       const initial = await step.do(
@@ -260,7 +263,7 @@ export class ArchiveAnalysisWorkflow extends WorkflowEntrypoint<
           await discord.sendMessage(thread.id, previewPayload(draft));
           await store.saveDraft(runId, draft, thread.id, llm.calls);
           await store.transition(runId, 'ANALYZING', 'AWAITING_APPROVAL');
-          await store.progress(
+          await progressStore.progress(
             runId,
             'AWAITING_APPROVAL',
             '변경안을 확인하고 승인해주세요.',

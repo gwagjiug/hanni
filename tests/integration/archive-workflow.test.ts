@@ -5,6 +5,7 @@ import {
   approveDraft,
   type ArchiveWorkflowDependencies,
 } from '../../src/skills/archive-url/run';
+import { approvalFailureMessage } from '../../src/skills/archive-url/errors';
 import type { ArchiveDraft, Env, RunRow, RunStatus } from '../../src/types';
 
 const env = {
@@ -66,6 +67,7 @@ function dependencies(initial: RunRow) {
     }),
     fail: vi.fn(async (_id, _from, status, category) => {
       current = { ...current, status, error_category: category };
+      return true;
     }),
     complete: vi.fn(async (_id, branch, prUrl) => {
       current = {
@@ -74,6 +76,7 @@ function dependencies(initial: RunRow) {
         github_branch: branch,
         github_pr_url: prUrl,
       };
+      return true;
     }),
   };
   const deps: ArchiveWorkflowDependencies = {
@@ -202,5 +205,13 @@ describe('archive workflow', () => {
     expect(setup.current().status).toBe('FAILED_EXTERNAL');
     expect(setup.deps.github.readArchive).not.toHaveBeenCalled();
     expect(setup.deps.github.createDraftPr).not.toHaveBeenCalled();
+  });
+
+  it('reports when the PR exists but completion persistence conflicts', () => {
+    expect(
+      approvalFailureMessage(
+        new Error('pr_created_but_completion_state_conflicted'),
+      ),
+    ).toContain('Draft PR은 생성됐지만');
   });
 });
