@@ -42,16 +42,26 @@ describe('archive renderer', () => {
   });
 
   it('adds a new category at the end', () => {
-    const output = insertReadmeEntry(
-      readme,
-      'AI & Business',
-      archiveEntry('New', 'https://example.com/new', 'new'),
+    const entry = archiveEntry('New', 'https://example.com/new', 'new');
+    const output = insertReadmeEntry(readme, 'AI & Business', entry);
+    expect(output).toBe(
+      `${readme.trimEnd()}\n\n## AI & Business\n\n${entry}\n`,
     );
-    expect(
-      output
-        .trimEnd()
-        .endsWith('- [New](https://example.com/new) ([pins](pins/new.md))'),
-    ).toBe(true);
+  });
+
+  it('creates a separate category when its name prefixes an existing heading', () => {
+    const entry = archiveEntry('New', 'https://example.com/new', 'new');
+    const output = insertReadmeEntry(readme, 'AI', entry);
+    expect(output).toBe(`${readme.trimEnd()}\n\n## AI\n\n${entry}\n`);
+  });
+
+  it('uses the exact existing heading rather than an earlier prefix match', () => {
+    const source = `${readme}\n## AI\n\n- Existing AI entry\n\n## writing\n\n- Writing entry\n`;
+    const entry = archiveEntry('New', 'https://example.com/new', 'new');
+    const output = insertReadmeEntry(source, 'AI', entry);
+    expect(output).toBe(
+      `${readme}\n## AI\n\n- Existing AI entry\n${entry}\n\n## writing\n\n- Writing entry\n`,
+    );
   });
 
   it('detects normalized duplicates', () => {

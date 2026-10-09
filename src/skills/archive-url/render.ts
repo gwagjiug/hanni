@@ -53,7 +53,13 @@ export function insertReadmeEntry(
     return readme;
   }
   const heading = `## ${category}`;
-  const start = readme.indexOf(heading);
+  let start = -1;
+  for (const match of readme.matchAll(/^## (.+)$/gm)) {
+    if (match[1]!.trim() === category) {
+      start = match.index;
+      break;
+    }
+  }
   if (start < 0) {
     return `${readme.trimEnd()}\n\n${heading}\n\n${entry}\n`;
   }
