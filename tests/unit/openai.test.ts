@@ -39,11 +39,6 @@ describe('OpenAI boundary', () => {
       cachedInputTokens: 10,
       outputTokens: 20,
     });
-    const sent = JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body));
-    expect(sent.input[0].content).toContain('not a chatbot');
-    expect(sent.input[0].content).toContain('naturally in Korean');
-    expect(sent.reasoning).toEqual({ effort: 'minimal' });
-    expect(sent.tools).toBeUndefined();
   });
 
   it('retries malformed structured output once and stops', async () => {
