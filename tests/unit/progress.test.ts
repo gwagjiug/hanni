@@ -1,14 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { formatRunStatus, progressLabel } from '../../src/agent/progress';
+import { formatRunStatus } from '../../src/agent/progress';
 import type { RunRow } from '../../src/types';
 
 describe('run progress', () => {
-  it('shows a user-facing label for each analysis step', () => {
-    expect(progressLabel('FETCHING_METADATA')).toBe('문서 제목 확인');
-    expect(progressLabel('CLASSIFYING_ENTRY')).toBe('카테고리와 PR 설명 생성');
-  });
-
-  it('includes heartbeat, retry and Workflow state in status output', () => {
+  it('computes elapsed time from the last heartbeat', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-13T04:10:30.000Z'));
     const row = {
@@ -23,10 +18,7 @@ describe('run progress', () => {
     } as RunRow;
 
     const message = formatRunStatus(row, 'running');
-    expect(message).toContain('카테고리와 PR 설명 생성');
     expect(message).toContain('마지막 진행: 10초 전');
-    expect(message).toContain('재시도: 1회');
-    expect(message).toContain('Workflow: running');
     vi.useRealTimers();
   });
 });

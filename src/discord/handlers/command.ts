@@ -2,6 +2,7 @@ import { normalizePublicUrl, OUT_OF_SCOPE_MESSAGE } from '../../policies/scope';
 import { formatRunStatus } from '../../agent/progress';
 import { RunMetricsStore } from '../../storage/run-metrics';
 import { RunStore } from '../../storage/runs';
+import { PublicationStore } from '../../storage/publications';
 import { parsePins, validatePins } from '../../skills/archive-url/input';
 import {
   errorResponse,
@@ -37,13 +38,23 @@ export async function handleCommand(
   if (interaction.data?.name === 'hanni-status') {
     const latest = await store.latestForUser(userId);
     let workflowStatus: string | undefined;
-    if (latest?.workflow_instance_id) {
+    const publication = latest
+      ? await new PublicationStore(env.DB).get(latest.id)
+      : null;
+    if (publication) {
+      workflowStatus = await env.ARCHIVE_PUBLICATION_WORKFLOW.get(
+        publication.run_id,
+      )
+        .then((instance) => instance.status())
+        .then((status) => `PR ${status.status}`)
+        .catch(() => 'PR 조회 실패');
+    } else if (latest?.workflow_instance_id) {
       workflowStatus = await env.ARCHIVE_WORKFLOW.get(
         latest.workflow_instance_id,
       )
         .then((instance) => instance.status())
-        .then((status) => status.status)
-        .catch(() => '조회 실패');
+        .then((status) => `분석 ${status.status}`)
+        .catch(() => '분석 조회 실패');
     }
     return errorResponse(
       latest

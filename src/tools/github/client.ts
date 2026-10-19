@@ -6,13 +6,45 @@ const installationTokenSchema = z.object({
   token: z.string().min(1),
   expires_at: z.string().datetime(),
 });
-const refSchema = z.object({ object: shaSchema });
+const refSchema = z.object({
+  ref: z.string().min(1),
+  object: shaSchema.extend({ type: z.literal('commit') }),
+});
 const commitSchema = z.object({ tree: shaSchema });
 const contentSchema = z.object({ content: z.string() });
 const treeSchema = z.object({
   tree: z.array(z.object({ path: z.string() })),
 });
-const pullRequestSchema = z.object({ html_url: z.string().url() });
+const pullRequestRefSchema = z.object({
+  ref: z.string().min(1),
+  sha: z.string().min(1),
+  repo: z
+    .object({
+      name: z.string().min(1),
+      owner: z.object({ login: z.string().min(1) }),
+    })
+    .nullable(),
+});
+const pullRequestSchema = z.object({
+  number: z.number().int().positive(),
+  html_url: z.string().url(),
+  state: z.enum(['open', 'closed']),
+  draft: z.boolean().optional(),
+  head: pullRequestRefSchema,
+  base: pullRequestRefSchema,
+});
+type PullRequest = z.infer<typeof pullRequestSchema>;
+
+class GitHubHttpError extends Error {
+  constructor(
+    readonly status: number,
+    path: string,
+  ) {
+    super(`github_http_${status}:${path}`);
+  }
+}
+
+class GitHubConflictError extends Error {}
 
 function base64Url(bytes: Uint8Array): string {
   let binary = '';
@@ -75,10 +107,7 @@ export interface ArchiveSnapshot {
   files: Set<string>;
 }
 
-export interface CreateDraftPrInput {
-  runId: string;
-  title: string;
-  body: string;
+export interface CreateArchiveCommitInput {
   commitMessage: string;
   baseCommitSha: string;
   baseTreeSha: string;
@@ -114,12 +143,16 @@ export class GitHubClient {
     if (!response.ok) {
       throw new Error(`github_installation_token_${response.status}`);
     }
-    const data = installationTokenSchema.parse(await response.json());
+    const data = await response.json().catch(() => null);
+    const parsed = installationTokenSchema.safeParse(data);
+    if (!parsed.success) {
+      throw new Error('github_installation_token_invalid_response');
+    }
     this.installationToken = {
-      value: data.token,
-      expiresAt: Date.parse(data.expires_at),
+      value: parsed.data.token,
+      expiresAt: Date.parse(parsed.data.expires_at),
     };
-    return data.token;
+    return parsed.data.token;
   }
 
   private headers(token: string, input?: HeadersInit): Headers {
@@ -144,16 +177,24 @@ export class GitHubClient {
         headers: this.headers(await this.token(), init.headers),
       });
       if (response.ok) {
-        const value =
-          response.status === 204 ? undefined : await response.json();
-        return schema.parse(value);
+        try {
+          const value =
+            response.status === 204 ? undefined : await response.json();
+          const parsed = schema.safeParse(value);
+          if (parsed.success) {
+            return parsed.data;
+          }
+        } catch {
+          // Response bodies may contain credentials or untrusted remote content.
+        }
+        throw new Error(`github_invalid_response:${path}`);
       }
       const retryableRead =
         method === 'GET' &&
         attempt === 0 &&
         (response.status === 429 || response.status >= 500);
       if (!retryableRead) {
-        throw new Error(`github_http_${response.status}:${path}`);
+        throw new GitHubHttpError(response.status, path);
       }
     }
     throw new Error(`github_retry_exhausted:${path}`);
@@ -189,16 +230,8 @@ export class GitHubClient {
     };
   }
 
-  async createDraftPr(
-    input: CreateDraftPrInput,
-  ): Promise<{ branch: string; prUrl: string }> {
-    const {
-      ARCHIVE_OWNER: owner,
-      ARCHIVE_REPO: repo,
-      ARCHIVE_DEFAULT_BRANCH: base,
-    } = this.env;
-    const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const branch = `hanni/archive-${day}-${input.runId.slice(0, 8)}`;
+  async createArchiveCommit(input: CreateArchiveCommitInput): Promise<string> {
+    const { ARCHIVE_OWNER: owner, ARCHIVE_REPO: repo } = this.env;
     const readmeBlob = await this.request(
       `/repos/${owner}/${repo}/git/blobs`,
       shaSchema,
@@ -257,12 +290,174 @@ export class GitHubClient {
         }),
       },
     );
-    await this.request(`/repos/${owner}/${repo}/git/refs`, z.unknown(), {
-      method: 'POST',
-      body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: commit.sha }),
-    });
+    return commit.sha;
+  }
+
+  private async archiveBranch(
+    branch: string,
+  ): Promise<z.infer<typeof refSchema> | null> {
+    const { ARCHIVE_OWNER: owner, ARCHIVE_REPO: repo } = this.env;
     try {
-      const pr = await this.request(
+      const ref = await this.request(
+        `/repos/${owner}/${repo}/git/ref/heads/${encodeURIComponent(branch)}`,
+        refSchema,
+      );
+      if (ref.ref !== `refs/heads/${branch}`) {
+        throw new GitHubConflictError('github_branch_conflict');
+      }
+      return ref;
+    } catch (error) {
+      if (error instanceof GitHubHttpError && error.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  private assertBranchCommit(
+    ref: z.infer<typeof refSchema>,
+    branch: string,
+    commitSha: string,
+  ): void {
+    if (ref.ref !== `refs/heads/${branch}` || ref.object.sha !== commitSha) {
+      throw new GitHubConflictError('github_branch_conflict');
+    }
+  }
+
+  async ensureArchiveBranch(branch: string, commitSha: string): Promise<void> {
+    const existing = await this.archiveBranch(branch);
+    if (existing) {
+      this.assertBranchCommit(existing, branch, commitSha);
+      return;
+    }
+    const { ARCHIVE_OWNER: owner, ARCHIVE_REPO: repo } = this.env;
+    let created: z.infer<typeof refSchema>;
+    try {
+      created = await this.request(
+        `/repos/${owner}/${repo}/git/refs`,
+        refSchema,
+        {
+          method: 'POST',
+          body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: commitSha }),
+        },
+      );
+    } catch (error) {
+      let observed: z.infer<typeof refSchema> | null;
+      try {
+        observed = await this.archiveBranch(branch);
+      } catch (reconciliationError) {
+        if (reconciliationError instanceof GitHubConflictError) {
+          throw reconciliationError;
+        }
+        throw new Error('github_reconciliation_failed');
+      }
+      if (!observed) {
+        throw error;
+      }
+      this.assertBranchCommit(observed, branch, commitSha);
+      return;
+    }
+    this.assertBranchCommit(created, branch, commitSha);
+  }
+
+  private assertPullRequest(
+    pr: PullRequest,
+    branch: string,
+    commitSha: string,
+  ): void {
+    const {
+      ARCHIVE_OWNER: owner,
+      ARCHIVE_REPO: repo,
+      ARCHIVE_DEFAULT_BRANCH: base,
+    } = this.env;
+    if (
+      pr.head.ref !== branch ||
+      pr.head.sha !== commitSha ||
+      pr.head.repo?.owner.login.toLowerCase() !== owner.toLowerCase() ||
+      pr.head.repo?.name.toLowerCase() !== repo.toLowerCase() ||
+      pr.base.ref !== base ||
+      pr.base.repo?.owner.login.toLowerCase() !== owner.toLowerCase() ||
+      pr.base.repo?.name.toLowerCase() !== repo.toLowerCase()
+    ) {
+      throw new GitHubConflictError('github_pr_conflict');
+    }
+  }
+
+  private async findArchivePullRequest(
+    branch: string,
+    commitSha: string,
+  ): Promise<PullRequest | null> {
+    const {
+      ARCHIVE_OWNER: owner,
+      ARCHIVE_REPO: repo,
+      ARCHIVE_DEFAULT_BRANCH: base,
+    } = this.env;
+    const query = new URLSearchParams({
+      state: 'all',
+      head: `${owner}:${branch}`,
+      base,
+      per_page: '100',
+      page: '1',
+    });
+    let matches = await this.request(
+      `/repos/${owner}/${repo}/pulls?${query}`,
+      z.array(pullRequestSchema),
+    );
+    if (matches.length === 0) {
+      // A manually retargeted PR must not turn a replay into a second PR.
+      query.delete('base');
+      matches = await this.request(
+        `/repos/${owner}/${repo}/pulls?${query}`,
+        z.array(pullRequestSchema),
+      );
+    }
+    // A full page cannot establish uniqueness without an unbounded lookup.
+    if (matches.length >= 100) {
+      throw new Error('github_pr_lookup_limit');
+    }
+    for (const pr of matches) {
+      this.assertPullRequest(pr, branch, commitSha);
+    }
+    if (matches.length > 1) {
+      throw new GitHubConflictError('github_pr_ambiguous');
+    }
+    return matches[0] ?? null;
+  }
+
+  async findArchiveDraftPr(
+    branch: string,
+    commitSha: string,
+  ): Promise<{ branch: string; prUrl: string } | null> {
+    const existing = await this.findArchivePullRequest(branch, commitSha);
+    return existing ? { branch, prUrl: existing.html_url } : null;
+  }
+
+  async ensureArchiveDraftPr(input: {
+    branch: string;
+    commitSha: string;
+    title: string;
+    body: string;
+  }): Promise<{ branch: string; prUrl: string }> {
+    const existing = await this.findArchivePullRequest(
+      input.branch,
+      input.commitSha,
+    );
+    if (existing) {
+      return { branch: input.branch, prUrl: existing.html_url };
+    }
+    const ref = await this.archiveBranch(input.branch);
+    if (!ref) {
+      throw new Error('github_branch_missing');
+    }
+    this.assertBranchCommit(ref, input.branch, input.commitSha);
+    const {
+      ARCHIVE_OWNER: owner,
+      ARCHIVE_REPO: repo,
+      ARCHIVE_DEFAULT_BRANCH: base,
+    } = this.env;
+    let created: PullRequest;
+    try {
+      created = await this.request(
         `/repos/${owner}/${repo}/pulls`,
         pullRequestSchema,
         {
@@ -270,26 +465,34 @@ export class GitHubClient {
           body: JSON.stringify({
             title: input.title,
             body: input.body,
-            head: branch,
+            head: input.branch,
             base,
             draft: true,
           }),
         },
       );
-      return { branch, prUrl: pr.html_url };
     } catch (error) {
+      let observed: PullRequest | null;
       try {
-        await this.request(
-          `/repos/${owner}/${repo}/git/refs/heads/${branch}`,
-          z.undefined(),
-          { method: 'DELETE' },
+        observed = await this.findArchivePullRequest(
+          input.branch,
+          input.commitSha,
         );
-      } catch {
-        throw new Error(`github_pr_failed_branch_cleanup_failed:${branch}`, {
-          cause: error,
-        });
+      } catch (reconciliationError) {
+        if (reconciliationError instanceof GitHubConflictError) {
+          throw reconciliationError;
+        }
+        throw new Error('github_reconciliation_failed');
       }
-      throw error;
+      if (!observed) {
+        throw error;
+      }
+      return { branch: input.branch, prUrl: observed.html_url };
     }
+    this.assertPullRequest(created, input.branch, input.commitSha);
+    if (created.draft !== true) {
+      throw new GitHubConflictError('github_pr_conflict');
+    }
+    return { branch: input.branch, prUrl: created.html_url };
   }
 }

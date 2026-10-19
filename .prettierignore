@@ -3,3 +3,4 @@ dist/
 node_modules/
 _workspace/
 package-lock.json
+src/worker-bindings.d.ts

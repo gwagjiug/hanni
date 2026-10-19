@@ -89,15 +89,69 @@ Hanni는 archive의 기존 형식을 그대로 따릅니다.
 
 스레드에서는 세 가지 행동을 선택할 수 있어요.
 
-| 행동 | 결과                                                        |
-| ---- | ----------------------------------------------------------- |
-| 수정 | 변경안을 고친 뒤 다시 검증해요. 모델은 재호출하지 않습니다. |
-| 승인 | 최신 `archive/main`을 재검사한 뒤 Draft PR을 만듭니다.      |
-| 취소 | 실행을 끝내고 GitHub에는 아무것도 만들지 않습니다.          |
+| 행동 | 결과                                                                   |
+| ---- | ---------------------------------------------------------------------- |
+| 수정 | 변경안을 고친 뒤 다시 검증해요. 모델은 재호출하지 않습니다.            |
+| 승인 | 승인을 저장하고 최신 `archive/main`을 재검사한 뒤 Draft PR을 만듭니다. |
+| 취소 | 실행을 끝내고 GitHub에는 아무것도 만들지 않습니다.                     |
 
 승인하지 않은 실행은 24시간 뒤 만료됩니다.
 
 분석 중에는 같은 Discord 응답을 현재 작업에 맞게 갱신해요. `/hanni-status`에서는 현재 작업, 마지막 진행 시각, 재시도 횟수와 Cloudflare Workflow 상태를 확인할 수 있습니다.
+
+### Durable PR publication
+
+승인 응답을 보내기 전에 D1 트랜잭션으로 승인한 초안의 정확한 JSON·SHA-256,
+승인자·시각, 대상 저장소·기준 브랜치와 발행 의도를 저장하고 실행을
+`CREATING_PR`로 전환합니다. 승인 이후에는 초안을 수정하거나 취소할 수 없어요.
+HTTP 요청의 `waitUntil`은 Workflow 실행 요청만 담당하며 GitHub 쓰기를 직접 실행하지 않습니다.
+
+PR 발행은 별도 `ArchivePublicationWorkflow`가 실행합니다.
+
+- Workflow ID는 실행 ID, 브랜치는 `hanni/archive-<전체 실행 ID>`로 고정합니다.
+- 처음 파일을 준비할 때 최신 archive를 재검증하고 변경 내용을 저장합니다.
+  이후 복구에서는 그 내용을 재사용하며 승인한 Pin과 대상 저장소를 바꾸지 않아요.
+- commit SHA를 먼저 D1에 저장한 뒤 브랜치를 게시합니다.
+  같은 이름의 브랜치가 다른 SHA를 가리키면 덮어쓰거나 삭제하지 않고 중단합니다.
+- 기존 PR은 닫혔거나 ready 상태로 바뀐 경우까지 조회합니다.
+  승인된 대상·브랜치·commit과 일치하면 재사용하고, 모호하거나 충돌하면 새 PR을 만들지 않아요.
+- PR URL을 먼저 저장한 다음 실행 완료를 기록합니다.
+  GitHub 응답 유실이나 완료 기록 실패를 PR 미생성으로 단정하지 않습니다.
+
+발행 결과는 승인 여부와 별개로 `archive_publications.outcome`에 기록해요.
+
+| 결과        | 의미                                                                                    |
+| ----------- | --------------------------------------------------------------------------------------- |
+| `requested` | 승인을 저장했으며 GitHub 쓰기 시도 전입니다.                                            |
+| `attempted` | 쓰기 시도 구간에 진입했지만 원격 실행이나 성공을 증명하지 않습니다.                     |
+| `unknown`   | API 또는 저장소 오류로 결과 확인·복구가 필요합니다. 이미 PR URL을 관측했을 수도 있어요. |
+| `succeeded` | PR URL과 실행 완료를 저장했습니다.                                                      |
+| `failed`    | 승인 불일치나 브랜치·PR 충돌 등 자동 진행을 중단해야 하는 확정 오류입니다.              |
+
+5분 cron이 미발송 의도와 오류로 끝난 Workflow를 다시 실행합니다.
+정상 실행 중인 인스턴스는 중복 시작하지 않고, 조회한 상태가 `paused` 또는
+`terminated`인 동안에는 강제로 다시 켜지 않아요. Workflow 인스턴스 중지는 승인
+취소가 아니므로, Cloudflare 보관 기간이 끝나 인스턴스 기록이 사라지면 남아 있는
+발행 의도에서 다시 실행될 수 있습니다. 수동 복구 시 `RUN_ID`를
+`/hanni-status`의 실행 ID로 바꿔주세요.
+
+```bash
+# 일시중지한 인스턴스 재개
+npx wrangler workflows instances resume hanni-archive-publication RUN_ID
+# 종료한 인스턴스 또는 오류 인스턴스를 D1 체크포인트에서 다시 실행
+npx wrangler workflows instances restart hanni-archive-publication RUN_ID
+```
+
+`unknown`에서는 복구에 필요한 승인 초안과 준비한 파일 본문을 D1에 유지합니다.
+성공 또는 확정 실패 시에는 본문을 지우고 승인·대상·commit·PR URL 등 메타데이터만 남겨요.
+새 PR 발행 Workflow의 단계 출력에는 Pin이나 파일 본문을 저장하지 않습니다.
+Discord 완료 알림은 best effort이며 실패해도 이미 저장한 PR 성공을 뒤집지 않아요.
+관측한 PR URL은 `/hanni-status`에서도 확인할 수 있습니다.
+
+이 구조는 외부 API의 exactly-once 실행이나 장애 이후의 무조건 성공을 보장하지 않습니다.
+특히 외부 사용자의 동시 force-push와 PR 생성은 하나의 원자적 작업으로 묶을 수 없어요.
+승인과 외부 작업 결과를 구분하는 원칙은
+[oh-my-hermes의 external effect receipts](https://github.com/rlaope/oh-my-hermes/blob/365b37af6a842a3f33bb52f6c8f3abcd9ea0e992/src/workflows/external_effect_receipts.py)를 참고했습니다.
 
 ## Safety
 
@@ -111,7 +165,7 @@ Hanni의 행동 범위는 프롬프트만으로 제한하지 않아요.
 - Pin과 웹 metadata는 명령이 아닌 데이터로 취급해요.
 - 모델에 GitHub Tool과 자격 증명을 제공하지 않습니다.
 - GitHub에 쓰기 전 반드시 사용자 승인을 확인해요.
-- 승인 시점에 최신 `archive/main`을 다시 읽습니다.
+- PR 파일을 처음 준비할 때 최신 `archive/main`을 다시 읽습니다.
 - 중복 클릭과 동일 URL의 동시 실행을 차단해요.
 
 GitHub App은 `gwagjiug/archive` 한 저장소에만 설치하며 다음 권한만 사용합니다.
@@ -129,20 +183,20 @@ Discord HTTP Interaction
         ↓
 Scope & Permission Policy
         ↓
-Cloudflare Workflow
-        └── archive-url skill
-              ├── Web metadata
-              ├── GitHub read
-              ├── Structured model output
-              ├── Discord preview
-              └── GitHub Draft PR
+Cloudflare Analysis Workflow
+        └── Web metadata / GitHub read / Model / Discord preview
         ↓
-Cloudflare D1
+Approval transaction (D1 snapshot + publication intent)
         ↓
-Cost metrics & OpenTelemetry
+Cloudflare Publication Workflow ← Cron recovery
+        ├── Archive revalidation & commit checkpoint
+        ├── GitHub branch / Draft PR reconciliation
+        └── Result persistence / Discord notification
+        ↓
+Cloudflare D1 / Cost metrics & OpenTelemetry
 ```
 
-Hanni는 자유형 ReAct loop 대신 명시적인 상태 전이를 사용해요. 분석은 Cloudflare Workflow의 개별 단계로 실행하므로 Worker 요청이 끝난 뒤에도 상태를 보존하고, 실패한 외부 조회는 정해진 범위에서만 재시도합니다. 자연어 판단이 필요한 카테고리와 PR 문구만 모델에 맡기고 URL 검증, Markdown 생성, 권한, 승인, GitHub 쓰기는 코드가 처리해요.
+Hanni는 자유형 ReAct loop 대신 명시적인 상태 전이를 사용해요. 분석과 PR 발행은 별도 Cloudflare Workflow의 개별 단계로 실행하므로 Worker 요청이 끝난 뒤에도 상태를 보존합니다. 자연어 판단이 필요한 카테고리와 PR 문구만 모델에 맡기고 URL 검증, Markdown 생성, 권한, 승인, GitHub 쓰기는 코드가 처리해요.
 
 ```text
 RECEIVED
@@ -168,10 +222,10 @@ src/
 ├── evals/          # AX 평가
 ├── policies/       # URL, scope, 권한
 ├── skills/         # archive-url workflow
-├── storage/        # D1 run store
+├── storage/        # D1 실행 상태와 승인·발행 기록
 ├── telemetry/      # Cloudflare custom span과 attribute redaction
 ├── tools/          # Discord, GitHub, OpenAI, Web
-├── workflows/      # durable archive 분석 단계
+├── workflows/      # durable 분석·PR 발행 단계와 복구 dispatch
 └── index.ts        # Discord Interaction entrypoint
 ```
 
@@ -181,9 +235,14 @@ OpenAI 응답의 input, cached input, output token을 바탕으로 실행 비용
 
 D1에는 큰 실행 상태와 함께 `current_step`, `last_heartbeat_at`, `retry_count`, `workflow_instance_id`를 저장해요. 5분 동안 heartbeat가 없는 분석 실행은 cron이 `FAILED_TIMEOUT`으로 종료합니다. 단계별 구조화 로그와 Worker invocation log는 Cloudflare Workers Logs에서 확인할 수 있어요.
 
+`/hanni-status`는 승인 전에는 분석 Workflow, 승인 후에는 PR 발행 Workflow의 상태를
+표시합니다. 발행 Workflow가 `errored`여도 결과가 불확실하면 실행은 `CREATING_PR`와
+복구 대기 상태를 유지하며 최근 오류와 이미 관측한 PR URL을 보여줘요.
+
 ```bash
 npx wrangler tail hanni
 npx wrangler workflows instances describe hanni-archive-analysis latest
+npx wrangler workflows instances describe hanni-archive-publication latest
 ```
 
 Cloudflare Workers tracing은 Worker와 Workflow 실행, 외부 `fetch`, D1 호출을
@@ -194,7 +253,9 @@ Cloudflare Workers tracing은 Worker와 Workflow 실행, 외부 `fetch`, D1 호�
 - `web.fetch_metadata`
 - `llm.prepare_entry`
 - `github.revalidate`
-- `github.create_archive_draft_pr`
+- `github.create_archive_commit`
+- `github.ensure_archive_branch`
+- `github.ensure_archive_draft_pr`
 
 Hanni가 직접 추가하는 custom span에는 실행 ID, 읽기·쓰기 구분, 모델명, Pin
 개수처럼 제한된 정보만 기록하며 Pin 원문, prompt, response와 secret은 넣지
@@ -209,3 +270,27 @@ npm run validate
 ```
 
 개별 검사는 `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`로 실행할 수 있어요.
+
+### Binding types
+
+`wrangler.jsonc`의 바인딩이나 변수를 바꾼 뒤에는 선언을 직접 수정하지 않고 다시 생성합니다.
+secret 필드는 `src/types.ts`에 선언하며 아래 명령은 로컬 secret 파일을 읽지 않아요.
+
+```bash
+npx wrangler types src/worker-bindings.d.ts \
+  --env-interface CloudflareBindings --include-runtime=false \
+  --strict-vars=false --env-file=/dev/null
+```
+
+### PR publication rollout
+
+새 Worker를 배포하기 전에 `0003_archive_publications.sql`까지 적용해야 합니다.
+
+```bash
+npm run db:migrate:remote
+npm run deploy
+```
+
+구버전에서 이미 `CREATING_PR`이 된 실행에는 새 승인 기록과 고정 commit 정보가 없을 수 있어요.
+이 실행은 새 Workflow로 자동 변환하지 않습니다. 배포 전 구버전 발행 작업을 마치고
+GitHub의 실제 PR 상태를 확인해 정리해야 하며, 새 승인 기록을 추측해서 만들면 안 됩니다.

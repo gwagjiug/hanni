@@ -1,93 +1,71 @@
+import { PublicationStore, type Publication } from '../../storage/publications';
+import { RunStore } from '../../storage/runs';
 import type { Env } from '../../types';
-import { createArchiveWorkflowDependencies } from './dependencies';
-import { errorCategory, isBudgetFailure } from './errors';
-import {
-  archiveEntry,
-  hasUrl,
-  insertReadmeEntry,
-  renderPinFile,
-} from './render';
 import { parseArchiveDraft } from './schema';
+
+export async function approvedDraftHash(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(value),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('');
+}
 
 export async function approveDraft(
   env: Env,
   runId: string,
   userId: string,
-  dependencies = createArchiveWorkflowDependencies(env, runId),
-): Promise<{ branch: string; prUrl: string }> {
-  const { store, github, circuit, tracer } = dependencies;
-  const row = await store.get(runId);
+  dependencies = {
+    runs: new RunStore(env.DB),
+    publications: new PublicationStore(env.DB),
+  },
+): Promise<Publication> {
+  const { runs, publications } = dependencies;
+  const row = await runs.get(runId);
   if (!row || row.discord_user_id !== userId) {
     throw new Error('approval_forbidden');
   }
-  if (Date.parse(row.expires_at) < Date.now()) {
-    if (row.status === 'AWAITING_APPROVAL') {
-      await store.transition(
-        runId,
-        'AWAITING_APPROVAL',
-        'EXPIRED',
-        'approval_timeout',
-      );
+  const existing = await publications.get(runId);
+  if (existing) {
+    if (existing.approved_by !== userId) {
+      throw new Error('approval_forbidden');
     }
+    return existing;
+  }
+  if (row.status !== 'AWAITING_APPROVAL') {
+    throw new Error('approval_already_processed');
+  }
+  if (Date.parse(row.expires_at) < Date.now()) {
+    await runs.transition(
+      runId,
+      'AWAITING_APPROVAL',
+      'EXPIRED',
+      'approval_timeout',
+    );
     throw new Error('approval_expired');
   }
   if (!row.draft_json) {
     throw new Error('draft_missing');
   }
-  if (!(await store.transition(runId, 'AWAITING_APPROVAL', 'CREATING_PR'))) {
-    throw new Error('approval_already_processed');
+  const draft = parseArchiveDraft(row.draft_json);
+  if (draft.runId !== runId) {
+    throw new Error('approval_draft_mismatch');
   }
-
-  try {
-    const draft = parseArchiveDraft(row.draft_json);
-    circuit.tool('github.revalidate', runId);
-    const latest = await tracer.span(
-      'github.revalidate',
-      { 'tool.read_write': 'read', 'ax.dimension': 'agent_behavior' },
-      () => github.readArchive(),
-    );
-    if (hasUrl(latest.readme, draft.url)) {
-      throw new Error('archive_duplicate_url');
-    }
-    if (latest.files.has(draft.pinPath)) {
-      throw new Error('archive_slug_collision_after_approval');
-    }
-
-    const readme = insertReadmeEntry(
-      latest.readme,
-      draft.category.name,
-      archiveEntry(draft.title, draft.url, draft.slug),
-    );
-    const pinContent = renderPinFile(draft.title, draft.url, draft.pins);
-    circuit.tool('github.create_archive_draft_pr', runId);
-    const result = await tracer.span(
-      'github.create_archive_draft_pr',
-      { 'tool.read_write': 'write', 'ax.dimension': 'goal_achievement' },
-      () =>
-        github.createDraftPr({
-          runId,
-          title: draft.prTitle,
-          body: draft.prBody,
-          commitMessage: `archive: add ${draft.title}`,
-          baseCommitSha: latest.baseCommitSha,
-          baseTreeSha: latest.baseTreeSha,
-          readme,
-          pinPath: draft.pinPath,
-          pinContent,
-        }),
-    );
-    if (!(await store.complete(runId, result.branch, result.prUrl))) {
-      throw new Error('pr_created_but_completion_state_conflicted');
-    }
-    return result;
-  } catch (error) {
-    const category = errorCategory(error);
-    await store.fail(
-      runId,
-      'CREATING_PR',
-      isBudgetFailure(category) ? 'FAILED_BUDGET' : 'FAILED_EXTERNAL',
-      category,
-    );
-    throw error;
+  const publication = await publications.approve({
+    runId,
+    userId,
+    draftJson: row.draft_json,
+    draftHash: await approvedDraftHash(row.draft_json),
+    target: {
+      owner: env.ARCHIVE_OWNER,
+      repo: env.ARCHIVE_REPO,
+      baseBranch: env.ARCHIVE_DEFAULT_BRANCH,
+    },
+  });
+  if (!publication) {
+    throw new Error('approval_changed_or_expired');
   }
+  return publication;
 }

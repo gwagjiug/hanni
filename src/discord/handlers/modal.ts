@@ -129,7 +129,9 @@ export async function handleModal(
       archiveEntry(candidate.data.title, previous.url, candidate.data.slug),
     ),
   };
-  await store.replaceDraft(runId!, updated);
+  if (!(await store.replaceDraft(runId!, updated))) {
+    return errorResponse('이미 승인되었거나 종료된 실행은 수정할 수 없어요.');
+  }
   return jsonResponse({
     type: InteractionResponseType.UPDATE_MESSAGE,
     data: previewPayload(updated),
