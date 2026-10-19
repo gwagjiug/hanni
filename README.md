@@ -281,16 +281,3 @@ npx wrangler types src/worker-bindings.d.ts \
   --env-interface CloudflareBindings --include-runtime=false \
   --strict-vars=false --env-file=/dev/null
 ```
-
-### PR publication rollout
-
-새 Worker를 배포하기 전에 `0003_archive_publications.sql`까지 적용해야 합니다.
-
-```bash
-npm run db:migrate:remote
-npm run deploy
-```
-
-구버전에서 이미 `CREATING_PR`이 된 실행에는 새 승인 기록과 고정 commit 정보가 없을 수 있어요.
-이 실행은 새 Workflow로 자동 변환하지 않습니다. 배포 전 구버전 발행 작업을 마치고
-GitHub의 실제 PR 상태를 확인해 정리해야 하며, 새 승인 기록을 추측해서 만들면 안 됩니다.
