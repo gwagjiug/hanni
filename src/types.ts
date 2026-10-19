@@ -1,6 +1,4 @@
-export interface Env {
-  DB: D1Database;
-  ARCHIVE_WORKFLOW: Workflow<ArchiveWorkflowParams>;
+export interface Env extends CloudflareBindings {
   DISCORD_APPLICATION_ID: string;
   DISCORD_PUBLIC_KEY: string;
   DISCORD_BOT_TOKEN: string;
@@ -11,12 +9,6 @@ export interface Env {
   GITHUB_INSTALLATION_ID: string;
   GITHUB_APP_PRIVATE_KEY: string;
   OPENAI_API_KEY: string;
-  OPENAI_MODEL: string;
-  ARCHIVE_OWNER: string;
-  ARCHIVE_REPO: string;
-  ARCHIVE_DEFAULT_BRANCH: string;
-  APPROVAL_TTL_HOURS: string;
-  MAX_RUN_COST_USD: string;
 }
 
 export const RUN_STATUS = {

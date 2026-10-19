@@ -196,25 +196,12 @@ export class RunStore {
       .run();
   }
 
-  async replaceDraft(id: string, draft: ArchiveDraft): Promise<void> {
-    await this.db
+  async replaceDraft(id: string, draft: ArchiveDraft): Promise<boolean> {
+    const result = await this.db
       .prepare(
         "UPDATE runs SET draft_json = ?, updated_at = ? WHERE id = ? AND status = 'AWAITING_APPROVAL'",
       )
       .bind(JSON.stringify(draft), new Date().toISOString(), id)
-      .run();
-  }
-
-  async complete(id: string, branch: string, prUrl: string): Promise<boolean> {
-    assertTransition('CREATING_PR', 'COMPLETED');
-    const result = await this.db
-      .prepare(
-        `UPDATE runs SET status = 'COMPLETED', github_branch = ?, github_pr_url = ?,
-         interaction_token = NULL, source_url = NULL, draft_json = NULL, workflow_input_json = NULL,
-         current_step = 'COMPLETED', updated_at = ?
-         WHERE id = ? AND status = 'CREATING_PR'`,
-      )
-      .bind(branch, prUrl, new Date().toISOString(), id)
       .run();
     return result.meta.changes === 1;
   }

@@ -2,10 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { CircuitBreaker } from '../../src/agent/circuit-breaker';
 import {
   analyzeArchiveUrl,
-  approveDraft,
   type ArchiveWorkflowDependencies,
 } from '../../src/skills/archive-url/run';
-import { approvalFailureMessage } from '../../src/skills/archive-url/errors';
 import type { ArchiveDraft, Env, RunRow, RunStatus } from '../../src/types';
 
 const env = {
@@ -69,15 +67,6 @@ function dependencies(initial: RunRow) {
       current = { ...current, status, error_category: category };
       return true;
     }),
-    complete: vi.fn(async (_id, branch, prUrl) => {
-      current = {
-        ...current,
-        status: 'COMPLETED',
-        github_branch: branch,
-        github_pr_url: prUrl,
-      };
-      return true;
-    }),
   };
   const deps: ArchiveWorkflowDependencies = {
     store,
@@ -87,10 +76,6 @@ function dependencies(initial: RunRow) {
         baseCommitSha: 'commit',
         baseTreeSha: 'tree',
         files: new Set<string>(),
-      })),
-      createDraftPr: vi.fn(async () => ({
-        branch: 'hanni/branch',
-        prUrl: 'https://github.test/pr/1',
       })),
     },
     discord: {
@@ -130,39 +115,8 @@ describe('archive workflow', () => {
     );
 
     expect(setup.deps.prepare).toHaveBeenCalledOnce();
-    expect(setup.deps.github.createDraftPr).not.toHaveBeenCalled();
     expect(setup.current().status).toBe('AWAITING_APPROVAL');
     expect(setup.savedDraft()?.pinContent).toContain('> 원문 그대로');
-  });
-
-  it('creates a PR only after approval and completes the run', async () => {
-    const draft: ArchiveDraft = {
-      runId: 'run-12345678',
-      title: 'Useful Agent',
-      url: 'https://example.com/article',
-      pins: ['원문 그대로'],
-      slug: 'useful-agent',
-      pinPath: 'pins/useful-agent.md',
-      pinContent: 'old preview',
-      readmeBefore: '# Archive\n\n## AI\n',
-      readmeAfter: 'preview',
-      baseCommitSha: 'old',
-      baseTreeSha: 'old-tree',
-      model: 'test-model',
-      usage: { inputTokens: 100, cachedInputTokens: 0, outputTokens: 20 },
-      estimatedCostUsd: 0.001,
-      category: { name: 'AI', mode: 'existing', rationale: 'fit' },
-      prTitle: 'archive: add Useful Agent',
-      prBody: 'Adds pins.',
-    };
-    const setup = dependencies(
-      row({ status: 'AWAITING_APPROVAL', draft_json: JSON.stringify(draft) }),
-    );
-    const result = await approveDraft(env, draft.runId, 'owner', setup.deps);
-
-    expect(result.prUrl).toBe('https://github.test/pr/1');
-    expect(setup.deps.github.createDraftPr).toHaveBeenCalledOnce();
-    expect(setup.current().status).toBe('COMPLETED');
   });
 
   it('stops before Discord and GitHub writes when token usage exceeds the circuit', async () => {
@@ -184,34 +138,5 @@ describe('archive workflow', () => {
 
     expect(setup.current().status).toBe('FAILED_BUDGET');
     expect(setup.deps.discord.createThread).not.toHaveBeenCalled();
-    expect(setup.deps.github.createDraftPr).not.toHaveBeenCalled();
-  });
-
-  it('rejects a corrupted persisted draft before GitHub reads or writes', async () => {
-    const setup = dependencies(
-      row({
-        status: 'AWAITING_APPROVAL',
-        draft_json: JSON.stringify({
-          runId: 'run-12345678',
-          pins: 'not-an-array',
-        }),
-      }),
-    );
-
-    await expect(
-      approveDraft(env, 'run-12345678', 'owner', setup.deps),
-    ).rejects.toThrow();
-
-    expect(setup.current().status).toBe('FAILED_EXTERNAL');
-    expect(setup.deps.github.readArchive).not.toHaveBeenCalled();
-    expect(setup.deps.github.createDraftPr).not.toHaveBeenCalled();
-  });
-
-  it('reports when the PR exists but completion persistence conflicts', () => {
-    expect(
-      approvalFailureMessage(
-        new Error('pr_created_but_completion_state_conflicted'),
-      ),
-    ).toContain('Draft PR은 생성됐지만');
   });
 });

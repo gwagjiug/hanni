@@ -12,6 +12,11 @@ const stepLabels: Record<string, string> = {
   PUBLISHING_PREVIEW: 'Discord 미리보기 게시',
   AWAITING_APPROVAL: '사용자 승인 대기',
   CREATING_PR: 'Draft PR 생성',
+  REVALIDATING_ARCHIVE: '승인 내용과 최신 archive 검증',
+  CREATING_ARCHIVE_COMMIT: 'archive commit 준비',
+  ENSURING_ARCHIVE_BRANCH: '실행 전용 브랜치 확인',
+  ENSURING_ARCHIVE_PR: '기존 PR 확인과 Draft PR 생성',
+  PUBLICATION_RECOVERY: 'PR 생성 결과 확인과 복구 대기',
   COMPLETED: '완료',
   CANCELLED: '취소',
   EXPIRED: '승인 만료',
@@ -41,7 +46,7 @@ export function formatRunStatus(row: RunRow, workflowStatus?: string): string {
     lines.push(`Workflow: ${workflowStatus}`);
   }
   if (row.error_category) {
-    lines.push(`종료 원인: \`${row.error_category}\``);
+    lines.push(`최근 오류: \`${row.error_category}\``);
   }
   if (row.github_pr_url) {
     lines.push(row.github_pr_url);

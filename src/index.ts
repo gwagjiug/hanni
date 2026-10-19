@@ -11,8 +11,10 @@ import {
   DiscordClient,
 } from './tools/discord';
 import type { Env } from './types';
+import { recoverArchivePublications } from './workflows/publication-dispatch';
 
 export { ArchiveAnalysisWorkflow } from './workflows/archive-analysis';
+export { ArchivePublicationWorkflow } from './workflows/archive-publication';
 
 export default {
   async fetch(
@@ -54,6 +56,7 @@ export default {
 
   async scheduled(_event: ScheduledEvent, env: Env): Promise<void> {
     const store = new RunStore(env.DB);
+    await recoverArchivePublications(env);
     await store.expireOldRuns();
     const stale = await store.failStaleRuns(
       new Date(Date.now() - 5 * 60 * 1_000),
